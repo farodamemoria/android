@@ -1,0 +1,15 @@
+# Local credentials and deployment configuration
+.env
+.env.*
+!.env.example
+*.pem
+local.properties
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Android / Gradle
+.gradle/
+**/build/

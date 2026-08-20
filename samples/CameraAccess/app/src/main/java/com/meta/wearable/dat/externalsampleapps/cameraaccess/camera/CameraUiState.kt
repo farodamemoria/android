@@ -41,6 +41,9 @@ data class CameraUiState(
     val includeAudioInStream: Boolean = true,
     // The capture currently shown in the shared preview/share sheet (photo or video).
     val activePreview: CapturePreview? = null,
+    // A response generated only after the user explicitly requests analysis for a captured photo.
+    val isAnalyzingPhoto: Boolean = false,
+    val photoAnalysis: String? = null,
     // Drives the confirm prompt shown before the camera-permission redirect to the Meta AI app.
     val showCameraPermissionRedirectConfirm: Boolean = false,
     // True while the stream-start flow is in flight before the SDK stream state turns STARTING —

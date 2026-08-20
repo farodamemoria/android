@@ -7,6 +7,18 @@
  */
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
+
+val localProperties =
+    Properties().apply {
+      val file = rootProject.file("local.properties")
+      if (file.exists()) {
+        file.inputStream().use(::load)
+      }
+    }
+val assistantApiBaseUrl =
+    System.getenv("ASSISTANT_API_BASE_URL")
+        ?: localProperties.getProperty("assistant_api_base_url", "")
 
 plugins {
   alias(libs.plugins.android.application)
@@ -34,6 +46,11 @@ android {
     // in Wearables Developer Center
     manifestPlaceholders["mwdat_application_id"] = ""
     manifestPlaceholders["mwdat_client_token"] = ""
+    buildConfigField(
+        "String",
+        "ASSISTANT_API_BASE_URL",
+        "\"${assistantApiBaseUrl.replace("\"", "\\\"")}\"",
+    )
   }
 
   buildTypes {

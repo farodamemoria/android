@@ -41,7 +41,9 @@ import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.assistant.AssistantApi
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.AudioInputHandler
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.HevcDecoder
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.HevcParameterSetCollector
@@ -75,6 +77,7 @@ class CameraViewModel(
   }
 
   private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
+  private val assistantApi = AssistantApi(BuildConfig.ASSISTANT_API_BASE_URL)
 
   private val _uiState = MutableStateFlow(CameraUiState())
   val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
@@ -442,7 +445,12 @@ class CameraViewModel(
             val bitmap = withContext(Dispatchers.Default) { decodePhoto(photoData) }
             if (bitmap != null) {
               _uiState.update {
-                it.copy(isCapturingPhoto = false, activePreview = CapturePreview.Photo(bitmap))
+                it.copy(
+                    isCapturingPhoto = false,
+                    activePreview = CapturePreview.Photo(bitmap),
+                    isAnalyzingPhoto = false,
+                    photoAnalysis = null,
+                )
               }
             } else {
               _uiState.update { it.copy(isCapturingPhoto = false) }
@@ -456,6 +464,29 @@ class CameraViewModel(
             _uiState.update { it.copy(isCapturingPhoto = false) }
             wearablesViewModel.setRecentError(error.getLocalizedDescription(getApplication()))
           } ?: _uiState.update { it.copy(isCapturingPhoto = false) }
+    }
+  }
+
+  /** Sends the currently previewed still image for an explicit, one-time visual description. */
+  fun analyzeCurrentPhoto() {
+    val preview = _uiState.value.activePreview as? CapturePreview.Photo ?: return
+    if (_uiState.value.isAnalyzingPhoto) return
+
+    _uiState.update { it.copy(isAnalyzingPhoto = true, photoAnalysis = null) }
+    viewModelScope.launch {
+      assistantApi
+          .analyze(preview.bitmap)
+          .onSuccess { answer ->
+            _uiState.update { it.copy(isAnalyzingPhoto = false, photoAnalysis = answer) }
+          }
+          .onFailure { error ->
+            Log.e(TAG, "Failed to analyze captured photo", error)
+            _uiState.update { it.copy(isAnalyzingPhoto = false) }
+            wearablesViewModel.setRecentError(
+                error.message
+                    ?: getApplication<Application>().getString(R.string.error_photo_analysis_failed)
+            )
+          }
     }
   }
 
@@ -496,7 +527,13 @@ class CameraViewModel(
     }
     when (val result = videoRecorder.stopRecording()) {
       is RecordingResult.Completed ->
-          _uiState.update { it.copy(activePreview = CapturePreview.Video(result.uri)) }
+          _uiState.update {
+            it.copy(
+                activePreview = CapturePreview.Video(result.uri),
+                isAnalyzingPhoto = false,
+                photoAnalysis = null,
+            )
+          }
       RecordingResult.NoRecording ->
           wearablesViewModel.setRecentError(
               getApplication<Application>().getString(R.string.error_recording_too_short)
@@ -517,7 +554,7 @@ class CameraViewModel(
 
   fun dismissCapturePreview() {
     val preview = _uiState.value.activePreview
-    _uiState.update { it.copy(activePreview = null) }
+    _uiState.update { it.copy(activePreview = null, isAnalyzingPhoto = false, photoAnalysis = null) }
     if (preview is CapturePreview.Video) {
       // The clip lives in the cache dir, exposed as a FileProvider content URI; delete through the
       // resolver so it resolves back to the real cache file (the URI's path is the provider

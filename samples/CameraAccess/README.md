@@ -28,6 +28,7 @@ A sample Android application demonstrating integration with Meta Wearables Devic
 1. Clone this repository
 1. Open the project in Android Studio
 1. Add your personal access token (classic) to the `local.properties` file (see [SDK for Android setup](https://wearables.developer.meta.com/docs/develop/dat/build-integration-android#step-2-add-the-sdk-to-gradle))
+1. Add `assistant_api_base_url=https://your-api.example.com` to `local.properties` to enable the optional LifeSense photo analysis action. This URL must use HTTPS in production.
 1. Click **File** > **Sync Project with Gradle Files**
 1. Click **Run** > **Run...** > **app**
 
@@ -39,6 +40,7 @@ A sample Android application demonstrating integration with Meta Wearables Devic
 1. Tap "Start Session" to connect to your glasses, then "Preview" to begin the live camera feed.
 1. Use the on-screen controls to:
    - Capture photos
+   - Choose **Ask LifeSense** on a captured photo to request a one-time scene description
    - Record video, toggling the microphone for sound-in-video
    - Preview and share captured photos and recorded videos
    - Stop the preview, end the session, or disconnect from the device

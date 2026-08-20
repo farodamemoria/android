@@ -37,6 +37,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,6 +67,9 @@ private const val TAG = "CapturePreviewScreen"
 @Composable
 fun CapturePreviewScreen(
     preview: CapturePreview,
+    isAnalyzing: Boolean,
+    analysis: String?,
+    onAnalyzePhoto: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -96,22 +101,52 @@ fun CapturePreviewScreen(
           }
         }
 
-        Column(
+        androidx.compose.foundation.layout.Row(
             modifier = Modifier.padding(top = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(32.dp),
+            verticalAlignment = Alignment.Top,
         ) {
-          CircleButton(
-              onClick = { shareCapture(context, preview) },
-              modifier = Modifier.size(64.dp).testTag("share_button"),
-          ) {
-            Icon(
-                imageVector = Icons.Filled.Share,
-                contentDescription = stringResource(R.string.share),
-                tint = Color.Black,
-            )
+          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircleButton(
+                onClick = { shareCapture(context, preview) },
+                modifier = Modifier.size(64.dp).testTag("share_button"),
+            ) {
+              Icon(
+                  imageVector = Icons.Filled.Share,
+                  contentDescription = stringResource(R.string.share),
+                  tint = Color.Black,
+              )
+            }
+            Text(text = stringResource(R.string.share), color = Color.White)
           }
-          Text(text = stringResource(R.string.share), color = Color.White)
+
+          if (preview is CapturePreview.Photo) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              CircleButton(
+                  onClick = onAnalyzePhoto,
+                  modifier = Modifier.size(64.dp).testTag("analyze_photo_button"),
+              ) {
+                if (isAnalyzing) {
+                  CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Black)
+                } else {
+                  Icon(
+                      imageVector = Icons.Filled.Visibility,
+                      contentDescription = stringResource(R.string.analyze_photo),
+                      tint = Color.Black,
+                  )
+                }
+              }
+              Text(text = stringResource(R.string.analyze_photo), color = Color.White)
+            }
+          }
+        }
+
+        if (analysis != null) {
+          Text(
+              text = analysis,
+              color = Color.White,
+              modifier = Modifier.padding(top = 24.dp),
+          )
         }
       }
 

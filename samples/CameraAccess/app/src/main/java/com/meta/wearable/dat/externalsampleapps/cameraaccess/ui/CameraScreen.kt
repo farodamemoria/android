@@ -165,6 +165,9 @@ fun CameraScreen(
     ui.activePreview?.let { preview ->
       CapturePreviewScreen(
           preview = preview,
+          isAnalyzing = ui.isAnalyzingPhoto,
+          analysis = ui.photoAnalysis,
+          onAnalyzePhoto = cameraViewModel::analyzeCurrentPhoto,
           onDismiss = { cameraViewModel.dismissCapturePreview() },
       )
     }

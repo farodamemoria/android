@@ -64,12 +64,14 @@
     <!-- Capture Preview -->
     <string name="captured_photo" description="Captured photo content description">Captured photo</string>
     <string name="share" description="Share">Share</string>
+    <string name="analyze_photo" description="Analyze a captured photo with LifeSense">Ask LifeSense</string>
     <string name="close_preview" description="Close preview content description">Close</string>
 
     <!-- Camera errors -->
     <string name="error_start_session_first" description="Error shown when previewing before a session is started">Start a session before previewing.</string>
     <string name="error_camera_permission_denied" description="Error shown when camera permission is denied">Camera permission denied</string>
     <string name="error_photo_capture_failed" description="Error shown when a photo capture fails">Couldn\'t capture photo. Try again.</string>
+    <string name="error_photo_analysis_failed" description="Error shown when visual analysis fails">LifeSense couldn\'t analyze this photo. Try again.</string>
     <string name="error_recording_too_short" description="Error shown when a recording stops before any video is captured">Couldn\'t record. Hold a little longer and try again.</string>
     <string name="error_recording_save_failed" description="Error shown when a recording cannot be finalized">Recording couldn\'t be saved. Try again.</string>
 
