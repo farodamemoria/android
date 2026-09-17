@@ -20,7 +20,10 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.view.PixelCopy
 import android.view.Surface
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
@@ -42,6 +45,7 @@ import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroApi
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroNotify
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroSpeaker
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.LocalFaceDetector
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
@@ -53,8 +57,11 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingSer
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.VideoRecorder
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
+import kotlin.coroutines.resume
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -63,7 +70,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 class CameraViewModel(
     application: Application,
@@ -75,6 +84,14 @@ class CameraViewModel(
     private const val FRAME_RATE = 24
     private const val KEYFRAME_WAIT_STEP_MS = 25L
     private const val KEYFRAME_WAIT_MAX_MS = 500L
+    private const val RECOGNITION_INTERVAL_MS = 15000L
+    private const val RECOGNITION_FRAME_COUNT = 3
+    private const val RECOGNITION_MAX_ATTEMPTS = 5
+    private const val RECOGNITION_FRAME_GAP_MS = 250L
+    private const val RECOGNITION_CAPTURE_TIMEOUT_MS = 8000L
+    private const val RECOGNITION_PREVIEW_TIMEOUT_MS = 2000L
+    private const val RECOGNITION_CONFIRMED_COOLDOWN_MS = 300000L
+    private const val RECOGNITION_REVIEW_COOLDOWN_MS = 120000L
   }
 
   private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
@@ -214,37 +231,124 @@ class CameraViewModel(
   }
 
   private var recognitionJob: Job? = null
+  private var recognitionCooldownUntil = 0L
+  private val faceDetector = LocalFaceDetector()
+
+  @Volatile private var latestFrameWidth = 0
+  @Volatile private var latestFrameHeight = 0
 
   private fun startRecognitionLoop() {
     if (recognitionJob?.isActive == true) return
     recognitionJob =
         viewModelScope.launch {
           while (true) {
-            kotlinx.coroutines.delay(20000L)
+            delay(RECOGNITION_INTERVAL_MS)
             if (_uiState.value.streamState != StreamState.STREAMING) break
-            val frames = mutableListOf<ByteArray>()
-            repeat(3) {
-              stream?.capturePhoto()?.onSuccess { photoData ->
-                withContext(Dispatchers.Default) {
-                  val bitmap = decodePhoto(photoData)
-                  if (bitmap != null) {
-                    val out = java.io.ByteArrayOutputStream()
-                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
-                    frames.add(out.toByteArray())
-                  }
-                }
-              }
-              kotlinx.coroutines.delay(300L)
-            }
-            if (frames.size >= 3) {
-              val result = withContext(Dispatchers.IO) { FaroApi.recognize(frames) }
-              if (result?.optString("status") == "confirmed") {
+            if (System.currentTimeMillis() < recognitionCooldownUntil) continue
+            val frames = captureRecognitionFrames()
+            if (frames.size < RECOGNITION_FRAME_COUNT) continue
+            val result = withContext(Dispatchers.IO) { FaroApi.recognize(frames) }
+            when (result?.optString("status")) {
+              "confirmed" -> {
                 val name = result.optJSONObject("person")?.optString("display_name")
                 if (!name.isNullOrEmpty()) FaroSpeaker.speak(getApplication(), "É $name.")
+                recognitionCooldownUntil =
+                    System.currentTimeMillis() + RECOGNITION_CONFIRMED_COOLDOWN_MS
+              }
+              "review_required" ->
+                  recognitionCooldownUntil =
+                      System.currentTimeMillis() + RECOGNITION_REVIEW_COOLDOWN_MS
+            }
+          }
+        }
+  }
+
+  /**
+   * The glasses play a shutter sound on every capture, so the live preview is checked locally first
+   * (ML Kit) and only faces are captured and uploaded — every uploaded frame is cropped to the face.
+   */
+  private suspend fun captureRecognitionFrames(): List<ByteArray> {
+    val frames = mutableListOf<ByteArray>()
+    val preview = capturePreviewBitmap()
+    if (preview != null) {
+      val hasFace = faceDetector.hasFace(preview)
+      preview.recycle()
+      if (!hasFace) return frames
+    } else {
+      captureFaceCrop()?.let { frames.add(it) } ?: return frames
+    }
+    var attempts = frames.size
+    while (frames.size < RECOGNITION_FRAME_COUNT && attempts < RECOGNITION_MAX_ATTEMPTS) {
+      attempts++
+      delay(RECOGNITION_FRAME_GAP_MS)
+      captureFaceCrop()?.let { frames.add(it) }
+    }
+    return frames
+  }
+
+  private suspend fun captureFaceCrop(): ByteArray? {
+    val jpeg = captureFrame() ?: return null
+    val bitmap =
+        withContext(Dispatchers.Default) {
+          BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+        } ?: return null
+    val crop = withContext(Dispatchers.Default) { faceDetector.cropLargestFace(bitmap) }
+    bitmap.recycle()
+    return crop
+  }
+
+  private suspend fun captureFrame(): ByteArray? {
+    val result = stream?.capturePhoto() ?: return null
+    val deferred = CompletableDeferred<ByteArray?>()
+    result
+        .onSuccess { photoData ->
+          viewModelScope.launch(Dispatchers.Default) {
+            val bytes =
+                runCatching {
+                  decodePhoto(photoData)?.let { bitmap ->
+                    ByteArrayOutputStream().use { out ->
+                      bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                      out.toByteArray()
+                    }
+                  }
+                }.getOrNull()
+            deferred.complete(bytes)
+          }
+        }
+        .onFailure { deferred.complete(null) }
+    return withTimeoutOrNull(RECOGNITION_CAPTURE_TIMEOUT_MS) { deferred.await() }
+  }
+
+  private suspend fun capturePreviewBitmap(): Bitmap? {
+    val surface = decoderSurface ?: return null
+    val width = latestFrameWidth
+    val height = latestFrameHeight
+    if (width <= 0 || height <= 0) return null
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val copied =
+        withContext(Dispatchers.Main) {
+          withTimeoutOrNull(RECOGNITION_PREVIEW_TIMEOUT_MS) {
+            suspendCancellableCoroutine { continuation ->
+              try {
+                PixelCopy.request(
+                    surface,
+                    bitmap,
+                    { result ->
+                      if (continuation.isActive) {
+                        continuation.resume(if (result == PixelCopy.SUCCESS) bitmap else null)
+                      }
+                    },
+                    Handler(Looper.getMainLooper()),
+                )
+              } catch (error: Exception) {
+                Log.w(TAG, "Preview copy unavailable: ${error.message}")
+                if (continuation.isActive) continuation.resume(null)
               }
             }
           }
         }
+    if (copied == null) bitmap.recycle()
+    return copied
   }
 
   private var reconnectJob: kotlinx.coroutines.Job? = null
@@ -412,6 +516,9 @@ class CameraViewModel(
     val width = videoFrame.width
     val height = videoFrame.height
     val presentationTimeUs = videoFrame.presentationTimeUs
+
+    latestFrameWidth = width
+    latestFrameHeight = height
 
     val byteArray = ByteArray(buffer.remaining())
     val originalPosition = buffer.position()
@@ -672,6 +779,7 @@ class CameraViewModel(
     cleanupSession()
     audioInputHandler.cleanup()
     videoRecorder.close()
+    faceDetector.close()
   }
 
   class Factory(
