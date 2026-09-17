@@ -248,7 +248,7 @@ class CameraViewModel(
               continue
             }
             val result = withContext(Dispatchers.IO) { FaroApi.recognize(frames) }
-            Log.d(TAG, "Recognition result: ${result?.optString("status") ?: "no-response"}")
+            Log.d(TAG, "Recognition result: ${result?.optString("status") ?: "no-response"} conf=${result?.optDouble("confidence")} reason=${result?.optString("reason")}")
             when (result?.optString("status")) {
               "confirmed" -> {
                 val person = result.optJSONObject("person")
@@ -293,6 +293,7 @@ class CameraViewModel(
   private suspend fun previewFaceCrop(): ByteArray? {
     val bitmap = capturePreviewBitmap() ?: return null
     val crop = withContext(Dispatchers.Default) { faceDetector.cropLargestFace(bitmap) }
+    Log.d(TAG, "Recognition crop: preview=${bitmap.width}x${bitmap.height} crop=${crop?.size ?: 0}B")
     bitmap.recycle()
     return crop
   }
@@ -418,7 +419,7 @@ class CameraViewModel(
     current
         .addCamera(
             StreamConfiguration(
-                videoQuality = VideoQuality.MEDIUM,
+                videoQuality = VideoQuality.HIGH,
                 frameRate = FRAME_RATE,
                 // Compressed HEVC so frames feed both the on-screen decoder and the passthrough
                 // MP4 writer.
