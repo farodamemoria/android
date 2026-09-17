@@ -211,17 +211,19 @@ class CameraViewModel(
     }
   }
 
-  private var lastReconnectAt = 0L
+  private var reconnectJob: kotlinx.coroutines.Job? = null
 
   private fun scheduleReconnect() {
-    if (userEnded) return
-    val now = android.os.SystemClock.uptimeMillis()
-    if (now - lastReconnectAt < 5000L) return
-    lastReconnectAt = now
-    viewModelScope.launch {
-      kotlinx.coroutines.delay(3000L)
-      if (!_uiState.value.hasSession) startSession()
-    }
+    if (userEnded || reconnectJob?.isActive == true) return
+    reconnectJob =
+        viewModelScope.launch {
+          kotlinx.coroutines.delay(3000L)
+          while (!userEnded && _uiState.value.sessionState != DeviceSessionState.STARTED) {
+            cleanupSession()
+            startSession()
+            kotlinx.coroutines.delay(8000L)
+          }
+        }
   }
 
   private fun cleanupSession() {
