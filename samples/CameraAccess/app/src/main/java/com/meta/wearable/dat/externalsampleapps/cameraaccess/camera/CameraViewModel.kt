@@ -39,6 +39,7 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroNotify
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
@@ -153,8 +154,11 @@ class CameraViewModel(
   // MARK: - Lifecycle step 1: session
 
   /** Creates and starts a [DeviceSession] (no stream yet). */
+  private var userEnded = false
+
   fun startSession() {
     if (_uiState.value.hasSession) return
+    userEnded = false
     Wearables.createSession(deviceSelector)
         .onSuccess { created ->
           session = created
@@ -177,6 +181,7 @@ class CameraViewModel(
    * resources.
    */
   fun endSession() {
+    userEnded = true
     val current = session ?: return
     _uiState.update { it.copy(sessionState = DeviceSessionState.STOPPING) }
     current.stop()
@@ -186,8 +191,12 @@ class CameraViewModel(
     sessionStateJob = viewModelScope.launch {
       session.state.collect { state ->
         _uiState.update { it.copy(sessionState = state) }
+        if (state == DeviceSessionState.PAUSED) {
+          FaroNotify.notWorn()
+        }
         if (state == DeviceSessionState.STOPPED) {
           cleanupSession()
+          scheduleReconnect()
         }
       }
     }
@@ -197,7 +206,21 @@ class CameraViewModel(
         // DAT_APP_ON_THE_GLASSES_UPDATE_REQUIRED, which the SDK delivers as a one-shot event.
         Log.e(TAG, "Session error: ${error.description}")
         wearablesViewModel.setRecentError(error.getLocalizedDescription(getApplication()))
+        scheduleReconnect()
       }
+    }
+  }
+
+  private var lastReconnectAt = 0L
+
+  private fun scheduleReconnect() {
+    if (userEnded) return
+    val now = android.os.SystemClock.uptimeMillis()
+    if (now - lastReconnectAt < 5000L) return
+    lastReconnectAt = now
+    viewModelScope.launch {
+      kotlinx.coroutines.delay(3000L)
+      if (!_uiState.value.hasSession) startSession()
     }
   }
 

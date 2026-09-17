@@ -2,7 +2,7 @@
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" project="cameraaccess">
 
     <!-- App -->
-    <string name="app_name" description="Launcher label / app name">Camera Access</string>
+    <string name="app_name" description="Launcher label / app name">Faro</string>
 
     <!-- App chrome -->
     <string name="scaffold_error_icon_description" description="Content description for the error snackbar icon">Camera Access error</string>
