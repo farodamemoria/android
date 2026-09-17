@@ -57,11 +57,9 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingSer
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.VideoRecorder
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import kotlin.coroutines.resume
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -88,10 +86,9 @@ class CameraViewModel(
     private const val RECOGNITION_FRAME_COUNT = 3
     private const val RECOGNITION_MAX_ATTEMPTS = 5
     private const val RECOGNITION_FRAME_GAP_MS = 250L
-    private const val RECOGNITION_CAPTURE_TIMEOUT_MS = 8000L
     private const val RECOGNITION_PREVIEW_TIMEOUT_MS = 2000L
-    private const val RECOGNITION_CONFIRMED_COOLDOWN_MS = 300000L
-    private const val RECOGNITION_REVIEW_COOLDOWN_MS = 120000L
+    private const val RECOGNITION_CONFIRMED_COOLDOWN_MS = 90000L
+    private const val RECOGNITION_REVIEW_COOLDOWN_MS = 20000L
   }
 
   private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
@@ -246,12 +243,24 @@ class CameraViewModel(
             if (_uiState.value.streamState != StreamState.STREAMING) break
             if (System.currentTimeMillis() < recognitionCooldownUntil) continue
             val frames = captureRecognitionFrames()
-            if (frames.size < RECOGNITION_FRAME_COUNT) continue
+            if (frames.size < RECOGNITION_FRAME_COUNT) {
+              Log.d(TAG, "Recognition skipped: ${frames.size} frames with face")
+              continue
+            }
             val result = withContext(Dispatchers.IO) { FaroApi.recognize(frames) }
+            Log.d(TAG, "Recognition result: ${result?.optString("status") ?: "no-response"}")
             when (result?.optString("status")) {
               "confirmed" -> {
-                val name = result.optJSONObject("person")?.optString("display_name")
-                if (!name.isNullOrEmpty()) FaroSpeaker.speak(getApplication(), "É $name.")
+                val person = result.optJSONObject("person")
+                val name = person?.optString("display_name").orEmpty()
+                val relationship = person?.optString("relationship").orEmpty()
+                val message =
+                    when {
+                      name.isNotEmpty() && relationship.isNotEmpty() -> "É $name, $relationship."
+                      name.isNotEmpty() -> "É $name."
+                      else -> null
+                    }
+                message?.let { FaroSpeaker.speak(getApplication(), it) }
                 recognitionCooldownUntil =
                     System.currentTimeMillis() + RECOGNITION_CONFIRMED_COOLDOWN_MS
               }
@@ -269,54 +278,23 @@ class CameraViewModel(
    */
   private suspend fun captureRecognitionFrames(): List<ByteArray> {
     val frames = mutableListOf<ByteArray>()
-    val preview = capturePreviewBitmap()
-    if (preview != null) {
-      val hasFace = faceDetector.hasFace(preview)
-      preview.recycle()
-      if (!hasFace) return frames
-    } else {
-      captureFaceCrop()?.let { frames.add(it) } ?: return frames
-    }
-    var attempts = frames.size
+    var attempts = 0
     while (frames.size < RECOGNITION_FRAME_COUNT && attempts < RECOGNITION_MAX_ATTEMPTS) {
       attempts++
-      delay(RECOGNITION_FRAME_GAP_MS)
-      captureFaceCrop()?.let { frames.add(it) }
+      previewFaceCrop()?.let { frames.add(it) }
+      if (frames.size < RECOGNITION_FRAME_COUNT) delay(RECOGNITION_FRAME_GAP_MS)
     }
+    Log.d(TAG, "Recognition frames with face: ${frames.size}")
     return frames
   }
 
-  private suspend fun captureFaceCrop(): ByteArray? {
-    val jpeg = captureFrame() ?: return null
-    val bitmap =
-        withContext(Dispatchers.Default) {
-          BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
-        } ?: return null
+  // Every frame comes from the live preview (PixelCopy), never from capturePhoto, so the glasses
+  // shutter never sounds.
+  private suspend fun previewFaceCrop(): ByteArray? {
+    val bitmap = capturePreviewBitmap() ?: return null
     val crop = withContext(Dispatchers.Default) { faceDetector.cropLargestFace(bitmap) }
     bitmap.recycle()
     return crop
-  }
-
-  private suspend fun captureFrame(): ByteArray? {
-    val result = stream?.capturePhoto() ?: return null
-    val deferred = CompletableDeferred<ByteArray?>()
-    result
-        .onSuccess { photoData ->
-          viewModelScope.launch(Dispatchers.Default) {
-            val bytes =
-                runCatching {
-                  decodePhoto(photoData)?.let { bitmap ->
-                    ByteArrayOutputStream().use { out ->
-                      bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                      out.toByteArray()
-                    }
-                  }
-                }.getOrNull()
-            deferred.complete(bytes)
-          }
-        }
-        .onFailure { deferred.complete(null) }
-    return withTimeoutOrNull(RECOGNITION_CAPTURE_TIMEOUT_MS) { deferred.await() }
   }
 
   private suspend fun capturePreviewBitmap(): Bitmap? {
