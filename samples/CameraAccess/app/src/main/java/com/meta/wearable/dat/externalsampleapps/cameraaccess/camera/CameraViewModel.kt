@@ -39,7 +39,9 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroApi
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroNotify
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroSpeaker
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
@@ -211,6 +213,40 @@ class CameraViewModel(
     }
   }
 
+  private var recognitionJob: Job? = null
+
+  private fun startRecognitionLoop() {
+    if (recognitionJob?.isActive == true) return
+    recognitionJob =
+        viewModelScope.launch {
+          while (true) {
+            kotlinx.coroutines.delay(20000L)
+            if (_uiState.value.streamState != StreamState.STREAMING) break
+            val frames = mutableListOf<ByteArray>()
+            repeat(3) {
+              stream?.capturePhoto()?.onSuccess { photoData ->
+                withContext(Dispatchers.Default) {
+                  val bitmap = decodePhoto(photoData)
+                  if (bitmap != null) {
+                    val out = java.io.ByteArrayOutputStream()
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+                    frames.add(out.toByteArray())
+                  }
+                }
+              }
+              kotlinx.coroutines.delay(300L)
+            }
+            if (frames.size >= 3) {
+              val result = withContext(Dispatchers.IO) { FaroApi.recognize(frames) }
+              if (result?.optString("status") == "confirmed") {
+                val name = result.optJSONObject("person")?.optString("display_name")
+                if (!name.isNullOrEmpty()) FaroSpeaker.speak(getApplication(), "É $name.")
+              }
+            }
+          }
+        }
+  }
+
   private var reconnectJob: kotlinx.coroutines.Job? = null
 
   private fun scheduleReconnect() {
@@ -347,6 +383,11 @@ class CameraViewModel(
       var hasBeenActive = false
       stream.state.collect { state ->
         _uiState.update { it.copy(streamState = state) }
+        if (state == StreamState.STREAMING) startRecognitionLoop()
+        if (state == StreamState.STOPPED || state == StreamState.CLOSED) {
+          recognitionJob?.cancel()
+          recognitionJob = null
+        }
         val isTerminal = state == StreamState.STOPPED || state == StreamState.CLOSED
         if (!isTerminal) {
           hasBeenActive = true
