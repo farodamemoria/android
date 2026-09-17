@@ -246,12 +246,24 @@ class CameraViewModel(
             if (_uiState.value.streamState != StreamState.STREAMING) break
             if (System.currentTimeMillis() < recognitionCooldownUntil) continue
             val frames = captureRecognitionFrames()
-            if (frames.size < RECOGNITION_FRAME_COUNT) continue
+            if (frames.size < RECOGNITION_FRAME_COUNT) {
+              Log.d(TAG, "Recognition skipped: ${frames.size} frames with face")
+              continue
+            }
             val result = withContext(Dispatchers.IO) { FaroApi.recognize(frames) }
+            Log.d(TAG, "Recognition result: ${result?.optString("status") ?: "no-response"}")
             when (result?.optString("status")) {
               "confirmed" -> {
-                val name = result.optJSONObject("person")?.optString("display_name")
-                if (!name.isNullOrEmpty()) FaroSpeaker.speak(getApplication(), "É $name.")
+                val person = result.optJSONObject("person")
+                val name = person?.optString("display_name").orEmpty()
+                val relationship = person?.optString("relationship").orEmpty()
+                val message =
+                    when {
+                      name.isNotEmpty() && relationship.isNotEmpty() -> "É $name, $relationship."
+                      name.isNotEmpty() -> "É $name."
+                      else -> null
+                    }
+                message?.let { FaroSpeaker.speak(getApplication(), it) }
                 recognitionCooldownUntil =
                     System.currentTimeMillis() + RECOGNITION_CONFIRMED_COOLDOWN_MS
               }
@@ -271,7 +283,7 @@ class CameraViewModel(
     val frames = mutableListOf<ByteArray>()
     val preview = capturePreviewBitmap()
     if (preview != null) {
-      val hasFace = faceDetector.hasFace(preview)
+      val hasFace = withContext(Dispatchers.Default) { faceDetector.hasFace(preview) }
       preview.recycle()
       if (!hasFace) return frames
     } else {
