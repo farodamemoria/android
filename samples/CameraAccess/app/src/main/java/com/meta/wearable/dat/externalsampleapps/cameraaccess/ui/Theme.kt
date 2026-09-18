@@ -11,13 +11,17 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 import androidx.compose.ui.graphics.Color
 
 object AppColor {
-  val Green = Color(0xFF61BC63)
-  val Red = Color(0xFFFF3B30)
-  val Yellow = Color(0xFFFFCC00)
-  val DeepBlue = Color(0xFF0064E0)
-  val DestructiveBackground = Color(0xFFFFD8DB)
-  val DestructiveForeground = Color(0xFFAA071E)
-  val RecordAccent = Color(0xFFFF453A)
-  val UpdateRequiredBackground = Color(0xFFFFF4D6)
-  val UpdateRequiredForeground = Color(0xFF8A4B00)
+  val Brand = Color(0xFF0B4F6C)
+  val Family = Color(0xFF4CAF8A)
+  val Calm = Color(0xFFA7D8F0)
+  val Warm = Color(0xFFF6EAD9)
+  val Green = Family
+  val Red = Color(0xFFC05B4E)
+  val Yellow = Color(0xFFE0A63A)
+  val DeepBlue = Brand
+  val DestructiveBackground = Color(0xFFF7DED9)
+  val DestructiveForeground = Color(0xFF8A2E23)
+  val RecordAccent = Color(0xFFC05B4E)
+  val UpdateRequiredBackground = Color(0xFFF6EAD9)
+  val UpdateRequiredForeground = Color(0xFF8A5A1A)
 }
