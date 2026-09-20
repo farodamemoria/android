@@ -152,12 +152,6 @@ object FaroAudioMonitor {
           lastLogAt = now
         }
         previousRms = rms
-        val speaking = speech.size() > 0 || now - lastVoiceAt < 500
-        if (!speaking && rms > IMPACT_RMS && now - lastImpactAt > IMPACT_COOLDOWN_MS) {
-          lastImpactAt = now
-          Log.i(TAG, "Golpe seco detectado (rms=${rms.toInt()})")
-          sendDetection("fall")
-        }
         if (rms > SPEECH_RMS || speech.size() > 0) {
           if (speech.size() == 0) {
             speechStart = now
@@ -179,7 +173,7 @@ object FaroAudioMonitor {
           if (speechPeak >= 2000.0 && loudMs >= 150 && now - lastSpeechSentAt > SPEECH_COOLDOWN_MS) {
             lastSpeechSentAt = now
             Log.i(TAG, "Segmento (${loudMs}ms, pico ${speechPeak.toInt()}) -> transcripción")
-            sendVoiceIntent(speech.toByteArray())
+            sendVoiceIntent(speech.toByteArray(), speechPeak.toInt())
           }
           speech = java.io.ByteArrayOutputStream()
         }
@@ -204,7 +198,7 @@ object FaroAudioMonitor {
         .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
   }
 
-  private fun sendVoiceIntent(pcm: ByteArray) {
+  private fun sendVoiceIntent(pcm: ByteArray, peak: Int) {
     val wav = toWav(pcm)
     thread {
       try {
@@ -217,6 +211,8 @@ object FaroAudioMonitor {
         connection.setRequestProperty("Authorization", "Bearer ${FaroApi.TOKEN}")
         connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         connection.outputStream.use { out ->
+          out.write("--$boundary\r\n".toByteArray())
+          out.write("Content-Disposition: form-data; name=\"peak\"\r\n\r\n$peak\r\n".toByteArray())
           out.write("--$boundary\r\n".toByteArray())
           out.write(
               "Content-Disposition: form-data; name=\"audio\"; filename=\"command.wav\"\r\n".toByteArray()
