@@ -43,6 +43,7 @@ import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroApi
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroAudioMonitor
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroNotify
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroSpeaker
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.LocalFaceDetector
@@ -82,13 +83,12 @@ class CameraViewModel(
     private const val FRAME_RATE = 24
     private const val KEYFRAME_WAIT_STEP_MS = 25L
     private const val KEYFRAME_WAIT_MAX_MS = 500L
-    private const val RECOGNITION_INTERVAL_MS = 15000L
+    private const val RECOGNITION_INTERVAL_MS = 800L
     private const val RECOGNITION_FRAME_COUNT = 3
-    private const val RECOGNITION_MAX_ATTEMPTS = 5
-    private const val RECOGNITION_FRAME_GAP_MS = 250L
+    private const val RECOGNITION_MAX_ATTEMPTS = 3
+    private const val RECOGNITION_FRAME_GAP_MS = 80L
     private const val RECOGNITION_PREVIEW_TIMEOUT_MS = 2000L
-    private const val RECOGNITION_CONFIRMED_COOLDOWN_MS = 90000L
-    private const val RECOGNITION_REVIEW_COOLDOWN_MS = 20000L
+    private const val RECOGNITION_REVIEW_COOLDOWN_MS = 10000L
   }
 
   private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
@@ -261,8 +261,6 @@ class CameraViewModel(
                       else -> null
                     }
                 message?.let { FaroSpeaker.speak(getApplication(), it) }
-                recognitionCooldownUntil =
-                    System.currentTimeMillis() + RECOGNITION_CONFIRMED_COOLDOWN_MS
               }
               "review_required" ->
                   recognitionCooldownUntil =
@@ -419,7 +417,7 @@ class CameraViewModel(
     current
         .addCamera(
             StreamConfiguration(
-                videoQuality = VideoQuality.HIGH,
+                videoQuality = VideoQuality.MEDIUM,
                 frameRate = FRAME_RATE,
                 // Compressed HEVC so frames feed both the on-screen decoder and the passthrough
                 // MP4 writer.
@@ -466,10 +464,14 @@ class CameraViewModel(
       var hasBeenActive = false
       stream.state.collect { state ->
         _uiState.update { it.copy(streamState = state) }
-        if (state == StreamState.STREAMING) startRecognitionLoop()
+        if (state == StreamState.STREAMING) {
+          FaroAudioMonitor.pause()
+          startRecognitionLoop()
+        }
         if (state == StreamState.STOPPED || state == StreamState.CLOSED) {
           recognitionJob?.cancel()
           recognitionJob = null
+          FaroAudioMonitor.resume()
         }
         val isTerminal = state == StreamState.STOPPED || state == StreamState.CLOSED
         if (!isTerminal) {

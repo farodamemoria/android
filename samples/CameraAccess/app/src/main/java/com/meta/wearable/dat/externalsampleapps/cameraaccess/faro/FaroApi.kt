@@ -9,8 +9,8 @@ import java.util.Locale
 import org.json.JSONObject
 
 object FaroApi {
-  private const val BASE = "https://d2n7ih9kfxbzvd.cloudfront.net"
-  private const val TOKEN = "local-development-only"
+  const val BASE = "https://d2n7ih9kfxbzvd.cloudfront.net"
+  const val TOKEN = "local-development-only"
 
   fun recognize(frames: List<ByteArray>): JSONObject? {
     return try {
@@ -63,14 +63,27 @@ object FaroApi {
 
 object FaroSpeaker {
   private var tts: TextToSpeech? = null
+  private var ready = false
+  private val pending = mutableListOf<String>()
 
   fun speak(context: Context, text: String) {
+    if (text.isBlank()) return
     if (tts == null) {
       tts =
           TextToSpeech(context.applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) tts?.language = Locale("es", "ES")
+            ready = status == TextToSpeech.SUCCESS
+            if (ready) {
+              tts?.language = Locale("es", "ES")
+              val queued = pending.toList()
+              pending.clear()
+              queued.forEach { tts?.speak(it, TextToSpeech.QUEUE_ADD, null, "faro") }
+            }
           }
     }
-    tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "faro-speak")
+    if (ready) {
+      tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "faro")
+    } else {
+      pending.add(text)
+    }
   }
 }
