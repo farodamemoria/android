@@ -256,8 +256,9 @@ class CameraViewModel(
                 val relationship = person?.optString("relationship").orEmpty()
                 val message =
                     when {
-                      name.isNotEmpty() && relationship.isNotEmpty() -> "Es $name, $relationship."
-                      name.isNotEmpty() -> "Es $name."
+                      name.isNotEmpty() && relationship.isNotEmpty() ->
+                          "Esta persona es $name, $relationship."
+                      name.isNotEmpty() -> "Esta persona es $name."
                       else -> null
                     }
                 message?.let { FaroSpeaker.speak(getApplication(), it) }
