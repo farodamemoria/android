@@ -170,7 +170,7 @@ object FaroAudioMonitor {
         }
         if (speech.size() > 0 && (now - lastVoiceAt > SPEECH_SILENCE_MS || now - speechStart > SPEECH_MAX_MS)) {
           val loudMs = speechLoudFrames * FRAME_MS
-          if (speechPeak >= 2000.0 && loudMs >= 150 && now - lastSpeechSentAt > SPEECH_COOLDOWN_MS) {
+          if (speechPeak >= 2500.0 && loudMs >= 40 && now - lastSpeechSentAt > SPEECH_COOLDOWN_MS) {
             lastSpeechSentAt = now
             Log.i(TAG, "Segmento (${loudMs}ms, pico ${speechPeak.toInt()}) -> transcripción")
             sendVoiceIntent(speech.toByteArray(), speechPeak.toInt(), loudMs.toInt())
