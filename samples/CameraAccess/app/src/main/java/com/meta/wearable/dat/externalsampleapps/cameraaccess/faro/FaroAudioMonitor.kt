@@ -176,16 +176,9 @@ object FaroAudioMonitor {
         }
         if (speech.size() > 0 && (now - lastVoiceAt > SPEECH_SILENCE_MS || now - speechStart > SPEECH_MAX_MS)) {
           val loudMs = speechLoudFrames * FRAME_MS
-          if (loudMs <= 600 && speechPeak >= 3000.0) {
-            if (now - coughBurstAt in 150..3000 && now - lastCoughAt > COUGH_COOLDOWN_MS) {
-              lastCoughAt = now
-              Log.i(TAG, "Tos detectada (rms=${speechPeak.toInt()})")
-              sendDetection("cough")
-            }
-            coughBurstAt = now
-          } else if (loudMs >= SPEECH_MIN_MS && now - lastSpeechSentAt > SPEECH_COOLDOWN_MS) {
+          if (speechPeak >= 2000.0 && loudMs >= 150 && now - lastSpeechSentAt > SPEECH_COOLDOWN_MS) {
             lastSpeechSentAt = now
-            Log.i(TAG, "Segmento de voz (${loudMs}ms de voz) -> transcripción")
+            Log.i(TAG, "Segmento (${loudMs}ms, pico ${speechPeak.toInt()}) -> transcripción")
             sendVoiceIntent(speech.toByteArray())
           }
           speech = java.io.ByteArrayOutputStream()
