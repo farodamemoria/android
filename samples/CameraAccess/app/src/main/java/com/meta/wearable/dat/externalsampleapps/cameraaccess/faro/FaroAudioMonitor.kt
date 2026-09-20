@@ -25,7 +25,7 @@ object FaroAudioMonitor {
   private const val SAMPLE_RATE = 16000
   private const val FRAME_MS = 20
   private const val FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS / 1000
-  private const val IMPACT_RMS = 12000.0
+  private const val IMPACT_RMS = 9000.0
   private const val IMPACT_FACTOR = 6.0
   private const val COUGH_RMS = 3000.0
   private const val IMPACT_COOLDOWN_MS = 30000L
@@ -125,6 +125,7 @@ object FaroAudioMonitor {
       var speech = java.io.ByteArrayOutputStream()
       var speechStart = 0L
       var speechPeak = 0.0
+      var speechLoudFrames = 0
       var lastVoiceAt = 0L
       var lastSpeechSentAt = 0L
       while (running && !Thread.currentThread().isInterrupted) {
@@ -157,30 +158,34 @@ object FaroAudioMonitor {
           Log.i(TAG, "Golpe seco detectado (rms=${rms.toInt()})")
           sendDetection("fall")
         }
-        if (rms > SPEECH_RMS) {
+        if (rms > SPEECH_RMS || speech.size() > 0) {
           if (speech.size() == 0) {
             speechStart = now
             speechPeak = 0.0
+            speechLoudFrames = 0
           }
-          lastVoiceAt = now
-          if (rms > speechPeak) speechPeak = rms
+          if (rms > SPEECH_RMS) {
+            lastVoiceAt = now
+            speechLoudFrames++
+            if (rms > speechPeak) speechPeak = rms
+          }
           for (value in samples) {
             speech.write(value.toInt() and 0xFF)
             speech.write((value.toInt() shr 8) and 0xFF)
           }
         }
         if (speech.size() > 0 && (now - lastVoiceAt > SPEECH_SILENCE_MS || now - speechStart > SPEECH_MAX_MS)) {
-          val duration = now - speechStart
-          if (duration <= 600 && speechPeak >= 3000.0) {
+          val loudMs = speechLoudFrames * FRAME_MS
+          if (loudMs <= 600 && speechPeak >= 3000.0) {
             if (now - coughBurstAt in 150..3000 && now - lastCoughAt > COUGH_COOLDOWN_MS) {
               lastCoughAt = now
               Log.i(TAG, "Tos detectada (rms=${speechPeak.toInt()})")
               sendDetection("cough")
             }
             coughBurstAt = now
-          } else if (duration >= SPEECH_MIN_MS && now - lastSpeechSentAt > SPEECH_COOLDOWN_MS) {
+          } else if (loudMs >= SPEECH_MIN_MS && now - lastSpeechSentAt > SPEECH_COOLDOWN_MS) {
             lastSpeechSentAt = now
-            Log.i(TAG, "Segmento de voz (${duration}ms) -> transcripción")
+            Log.i(TAG, "Segmento de voz (${loudMs}ms de voz) -> transcripción")
             sendVoiceIntent(speech.toByteArray())
           }
           speech = java.io.ByteArrayOutputStream()
