@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroListeningService
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.ui.CameraAccessScaffold
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import kotlin.coroutines.resume
@@ -44,7 +45,7 @@ import kotlinx.coroutines.sync.withLock
 class MainActivity : ComponentActivity() {
   companion object {
     // Required Android permissions for the DAT SDK to function properly
-    val PERMISSIONS: Array<String> = arrayOf(BLUETOOTH, BLUETOOTH_CONNECT, INTERNET)
+    val PERMISSIONS: Array<String> = arrayOf(BLUETOOTH, BLUETOOTH_CONNECT, INTERNET, RECORD_AUDIO)
   }
 
   val viewModel: WearablesViewModel by viewModels()
@@ -108,6 +109,7 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
+    FaroListeningService.start(applicationContext)
     setContent {
       CameraAccessScaffold(
           viewModel = viewModel,
@@ -121,5 +123,6 @@ class MainActivity : ComponentActivity() {
     super.onStart()
     // First, ensure the app has necessary Android permissions
     permissionCheckLauncher.launch(PERMISSIONS)
+    FaroListeningService.start(applicationContext)
   }
 }

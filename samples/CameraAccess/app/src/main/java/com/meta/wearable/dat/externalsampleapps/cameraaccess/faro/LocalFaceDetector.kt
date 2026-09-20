@@ -8,6 +8,8 @@ import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
+
 
 class LocalFaceDetector : AutoCloseable {
   private val detector =
@@ -29,14 +31,29 @@ class LocalFaceDetector : AutoCloseable {
     val bottom = (box.bottom + padding).coerceAtMost(bitmap.height)
     if (right <= left || bottom <= top) return null
     val crop = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+    val upload = upscale(crop, MIN_UPLOAD_SIDE_PX)
     return try {
       ByteArrayOutputStream().use { out ->
-        crop.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        upload.compress(Bitmap.CompressFormat.JPEG, 92, out)
         out.toByteArray()
       }
     } finally {
+      if (upload !== crop) upload.recycle()
       crop.recycle()
     }
+  }
+
+  // Rekognition no detecta caras por debajo de ~250 px; al ampliar el recorte la coincidencia
+  // vuelve a funcionar aunque el frame original de la vista previa sea pequeño.
+  private fun upscale(source: Bitmap, minSide: Int): Bitmap {
+    if (source.width >= minSide && source.height >= minSide) return source
+    val scale = maxOf(minSide.toFloat() / source.width, minSide.toFloat() / source.height)
+    return Bitmap.createScaledBitmap(
+        source,
+        (source.width * scale).roundToInt(),
+        (source.height * scale).roundToInt(),
+        true,
+    )
   }
 
   private fun largestFace(bitmap: Bitmap): Rect? {
@@ -63,5 +80,6 @@ class LocalFaceDetector : AutoCloseable {
 
   private companion object {
     const val DETECTION_TIMEOUT_SECONDS = 5L
+    const val MIN_UPLOAD_SIDE_PX = 512
   }
 }
