@@ -173,7 +173,7 @@ object FaroAudioMonitor {
           if (speechPeak >= 2000.0 && loudMs >= 150 && now - lastSpeechSentAt > SPEECH_COOLDOWN_MS) {
             lastSpeechSentAt = now
             Log.i(TAG, "Segmento (${loudMs}ms, pico ${speechPeak.toInt()}) -> transcripción")
-            sendVoiceIntent(speech.toByteArray(), speechPeak.toInt())
+            sendVoiceIntent(speech.toByteArray(), speechPeak.toInt(), loudMs.toInt())
           }
           speech = java.io.ByteArrayOutputStream()
         }
@@ -198,7 +198,7 @@ object FaroAudioMonitor {
         .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
   }
 
-  private fun sendVoiceIntent(pcm: ByteArray, peak: Int) {
+  private fun sendVoiceIntent(pcm: ByteArray, peak: Int, loudMs: Int) {
     val wav = toWav(pcm)
     thread {
       try {
@@ -213,6 +213,8 @@ object FaroAudioMonitor {
         connection.outputStream.use { out ->
           out.write("--$boundary\r\n".toByteArray())
           out.write("Content-Disposition: form-data; name=\"peak\"\r\n\r\n$peak\r\n".toByteArray())
+          out.write("--$boundary\r\n".toByteArray())
+          out.write("Content-Disposition: form-data; name=\"loud_ms\"\r\n\r\n$loudMs\r\n".toByteArray())
           out.write("--$boundary\r\n".toByteArray())
           out.write(
               "Content-Disposition: form-data; name=\"audio\"; filename=\"command.wav\"\r\n".toByteArray()
