@@ -34,6 +34,7 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroListeningService
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroReminderService
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.ui.CameraAccessScaffold
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import kotlin.coroutines.resume
@@ -110,6 +111,7 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     FaroListeningService.start(applicationContext)
+    FaroReminderService.start(applicationContext)
     setContent {
       CameraAccessScaffold(
           viewModel = viewModel,

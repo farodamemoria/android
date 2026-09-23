@@ -9,12 +9,10 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import android.speech.tts.TextToSpeech
 import android.util.Log
 import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.Locale
 import org.json.JSONArray
 
 object FaroNotify {
@@ -44,7 +42,6 @@ object FaroNotify {
 
 class FaroReminderService : Service() {
   private var running = true
-  private var tts: TextToSpeech? = null
 
   override fun onCreate() {
     super.onCreate()
@@ -61,7 +58,6 @@ class FaroReminderService : Service() {
             .setOngoing(true)
             .build(),
     )
-    tts = TextToSpeech(this) { status -> if (status == TextToSpeech.SUCCESS) tts?.language = Locale("es", "ES") }
     Thread {
           while (running) {
             try {
@@ -72,13 +68,13 @@ class FaroReminderService : Service() {
                 val reminders = JSONArray(body)
                 for (index in 0 until reminders.length()) {
                   val message = reminders.getJSONObject(index).optString("message")
-                  if (message.isNotEmpty()) tts?.speak(message, TextToSpeech.QUEUE_ADD, null, "faro-$index")
+                  if (message.isNotEmpty()) FaroSpeaker.speak(applicationContext, message)
                 }
               }
             } catch (error: Exception) {
               Log.w("FaroReminders", "poll failed: ${error.message}")
             }
-            Thread.sleep(30000L)
+            Thread.sleep(5000L)
           }
         }
         .start()
@@ -88,7 +84,6 @@ class FaroReminderService : Service() {
 
   override fun onDestroy() {
     running = false
-    tts?.shutdown()
     super.onDestroy()
   }
 
@@ -97,6 +92,14 @@ class FaroReminderService : Service() {
   companion object {
     const val BASE = "https://d2n7ih9kfxbzvd.cloudfront.net"
     const val TOKEN = "local-development-only"
+
+    fun start(context: Context) {
+      runCatching {
+        androidx.core.content.ContextCompat.startForegroundService(
+            context, Intent(context, FaroReminderService::class.java)
+        )
+      }
+    }
   }
 }
 
