@@ -80,7 +80,7 @@ class CameraViewModel(
 
   companion object {
     private const val TAG = "CameraAccess:CameraViewModel"
-    private const val FRAME_RATE = 24
+    private const val FRAME_RATE = 15
     private const val KEYFRAME_WAIT_STEP_MS = 25L
     private const val KEYFRAME_WAIT_MAX_MS = 500L
     private const val RECOGNITION_INTERVAL_MS = 800L
@@ -418,7 +418,7 @@ class CameraViewModel(
     current
         .addCamera(
             StreamConfiguration(
-                videoQuality = VideoQuality.MEDIUM,
+                videoQuality = VideoQuality.HIGH,
                 frameRate = FRAME_RATE,
                 // Compressed HEVC so frames feed both the on-screen decoder and the passthrough
                 // MP4 writer.
