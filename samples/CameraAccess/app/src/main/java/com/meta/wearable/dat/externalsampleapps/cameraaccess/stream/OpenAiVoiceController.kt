@@ -36,6 +36,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
 
 /**
@@ -514,7 +515,7 @@ class OpenAiVoiceController(
                     audioRecord === record &&
                     !Thread.currentThread().isInterrupted) {
                   val count = record.read(buffer, 0, buffer.size)
-                  if (count > 0 && !webSocket.send(ByteString.of(buffer, 0, count))) {
+                  if (count > 0 && !webSocket.send(buffer.toByteString(0, count))) {
                     if (!running.get() || socket !== webSocket || audioRecord !== record) {
                       return@Thread
                     }
