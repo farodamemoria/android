@@ -110,4 +110,14 @@
     <string name="camera_permission_alert_title" description="Camera permission alert title">Camera access required</string>
     <string name="camera_permission_alert_message" description="Camera permission alert message">Camera access was denied. Enable it in Settings to use the camera source.</string>
     <string name="camera_permission_open_settings" description="Camera permission open settings button">Open Settings</string>
+
+    <!-- Realtime voice + pairing (KAN-112) -->
+    <string name="status_voice" description="Voice status chip label">Voz</string>
+    <string name="voice_start" description="Start the realtime voice session">Iniciar conversación</string>
+    <string name="voice_stop" description="Stop the realtime voice session">Terminar conversación</string>
+    <string name="pairing_title" description="Pairing dialog title">Emparellar con Faro</string>
+    <string name="pairing_message" description="Pairing dialog message">Escribe o código de 8 caracteres que ves en Faro Familia.</string>
+    <string name="pairing_code_hint" description="Pairing code field hint">Código</string>
+    <string name="pairing_confirm" description="Pairing confirm button">Emparellar</string>
+    <string name="pairing_cancel" description="Pairing cancel button">Cancelar</string>
 </resources>

@@ -45,6 +45,7 @@ import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroApi
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroAudioMonitor
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroNotify
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroPairing
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroSpeaker
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.LocalFaceDetector
 import com.meta.wearable.dat.core.types.Permission
@@ -53,9 +54,11 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.AudioInputHandler
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.HevcDecoder
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.HevcParameterSetCollector
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.OpenAiVoiceController
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.RecordingResult
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingService
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.VideoRecorder
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.VoiceConnectionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import java.io.ByteArrayInputStream
 import java.io.IOException
@@ -105,6 +108,10 @@ class CameraViewModel(
   private val audioInputHandler = AudioInputHandler(application)
   private val videoRecorder = VideoRecorder(application, viewModelScope)
 
+  // Realtime voice session (KAN-112); the Bearer credential comes from pairing with the circle.
+  private val voiceController =
+      OpenAiVoiceController(application) { FaroPairing.credential(getApplication()) }
+
   // Per-frame work (byte copy, NAL parsing, MediaMuxer writes, decoder feed) runs at frame rate and
   // must stay off the main thread. A single-threaded dispatcher keeps frames serialized so the
   // MediaMuxer/MediaCodec see in-order calls from one consistent thread.
@@ -153,6 +160,170 @@ class CameraViewModel(
         }
       }
     }
+    // Realtime voice session (KAN-112): state, errors and server requests.
+    _uiState.update { it.copy(isPaired = FaroPairing.isPaired(application)) }
+    viewModelScope.launch {
+      voiceController.state.collect { voiceState ->
+        _uiState.update { it.copy(voiceState = voiceState) }
+      }
+    }
+    viewModelScope.launch {
+      voiceController.error.collect { message ->
+        if (!message.isNullOrBlank()) {
+          wearablesViewModel.setRecentError(message)
+        }
+      }
+    }
+    setupVoiceRequestHandlers()
+  }
+
+  // MARK: - Realtime voice (KAN-112)
+
+  /** Wires the realtime backend's requests to this app's camera, recognition and alert pieces. */
+  private fun setupVoiceRequestHandlers() {
+    viewModelScope.launch {
+      voiceController.cameraRequests.collect { request ->
+        val jpeg = captureJpegForVoice()
+        if (jpeg != null) {
+          voiceController.submitCameraImage(request.callId, jpeg)
+        } else {
+          voiceController.submitCameraError(request.callId, "Non puiden capturar a imaxe das gafas")
+        }
+      }
+    }
+    viewModelScope.launch {
+      voiceController.faceRecognitionRequests.collect { request ->
+        val frames = captureRecognitionFrames()
+        val result =
+            if (frames.size >= RECOGNITION_FRAME_COUNT) {
+              withContext(Dispatchers.IO) { FaroApi.recognize(frames) }
+            } else {
+              null
+            }
+        when (result?.optString("status")) {
+          "confirmed" -> {
+            val person = result.optJSONObject("person")
+            val name = person?.optString("display_name").orEmpty()
+            val relationship = person?.optString("relationship").orEmpty()
+            val message =
+                when {
+                  name.isNotEmpty() && relationship.isNotEmpty() ->
+                      "Esta persona es $name, $relationship."
+                  name.isNotEmpty() -> "Esta persona es $name."
+                  else -> "Reconecín a esta persoa."
+                }
+            voiceController.submitFaceRecognitionResult(
+                request.callId, true, "confirmed", message, name.ifBlank { null })
+          }
+          "review_required" ->
+              voiceController.submitFaceRecognitionResult(
+                  request.callId,
+                  false,
+                  "review_required",
+                  "Non estou seguro de quen é; queda pendente de revisión")
+          else ->
+              voiceController.submitFaceRecognitionResult(
+                  request.callId, false, "unknown", "Non puiden recoñecer a ninguén")
+        }
+      }
+    }
+    viewModelScope.launch {
+      voiceController.familyHelpRequests.collect { request ->
+        val success =
+            withContext(Dispatchers.IO) {
+              FaroApi.sendAlert(request.kind, request.spokenMessage, true)
+            }
+        if (success) {
+          FaroSpeaker.speak(getApplication(), "Xa avisei á familia")
+          voiceController.submitFamilyHelpResult(request.callId, true, "Xa avisei á familia")
+        } else {
+          voiceController.submitFamilyHelpResult(
+              request.callId, false, "Non puiden avisar á familia")
+        }
+      }
+    }
+    viewModelScope.launch {
+      voiceController.currentLocationRequests.collect { request ->
+        // Location answer pending (KAN-41/KAN-125); respond with an explicit uncertainty.
+        voiceController.submitCurrentLocationResult(
+            request.callId,
+            false,
+            "unavailable",
+            "Non podo comprobar onde estás agora mesmo")
+      }
+    }
+  }
+
+  fun toggleVoice() {
+    when (_uiState.value.voiceState) {
+      VoiceConnectionState.LISTENING,
+      VoiceConnectionState.CONNECTING -> stopVoice()
+      else -> startVoice()
+    }
+  }
+
+  private fun startVoice() {
+    if (!FaroPairing.isPaired(getApplication())) {
+      _uiState.update { it.copy(showPairingDialog = true, pairingError = null) }
+      return
+    }
+    FaroAudioMonitor.pause()
+    if (!voiceController.start() && !_uiState.value.isStreaming) {
+      FaroAudioMonitor.resume()
+    }
+  }
+
+  private fun stopVoice() {
+    voiceController.stop()
+    if (!_uiState.value.isStreaming) {
+      FaroAudioMonitor.resume()
+    }
+  }
+
+  fun openPairing() {
+    _uiState.update { it.copy(showPairingDialog = true, pairingError = null) }
+  }
+
+  fun dismissPairing() {
+    if (!_uiState.value.pairingBusy) {
+      _uiState.update { it.copy(showPairingDialog = false, pairingError = null) }
+    }
+  }
+
+  fun submitPairing(code: String) {
+    val clean = code.trim()
+    if (clean.length != 8) {
+      _uiState.update { it.copy(pairingError = "O código ten 8 caracteres") }
+      return
+    }
+    _uiState.update { it.copy(pairingBusy = true, pairingError = null) }
+    viewModelScope.launch {
+      val error = withContext(Dispatchers.IO) { FaroPairing.claim(getApplication(), clean) }
+      _uiState.update {
+        it.copy(
+            pairingBusy = false,
+            showPairingDialog = error != null,
+            pairingError = error,
+            isPaired = FaroPairing.isPaired(getApplication()))
+      }
+      if (error == null) {
+        FaroSpeaker.speak(getApplication(), "Dispositivo emparellado con Faro")
+      }
+    }
+  }
+
+  /** Captures the live preview as a JPEG for a `CAMERA_REQUEST:`. */
+  private suspend fun captureJpegForVoice(): ByteArray? {
+    val bitmap = capturePreviewBitmap() ?: return null
+    val jpeg =
+        withContext(Dispatchers.Default) {
+          java.io.ByteArrayOutputStream().use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
+            out.toByteArray()
+          }
+        }
+    bitmap.recycle()
+    return jpeg
   }
 
   // MARK: - Surface
@@ -472,7 +643,9 @@ class CameraViewModel(
         if (state == StreamState.STOPPED || state == StreamState.CLOSED) {
           recognitionJob?.cancel()
           recognitionJob = null
-          FaroAudioMonitor.resume()
+          if (_uiState.value.voiceState == VoiceConnectionState.STOPPED) {
+            FaroAudioMonitor.resume()
+          }
         }
         val isTerminal = state == StreamState.STOPPED || state == StreamState.CLOSED
         if (!isTerminal) {
@@ -761,6 +934,7 @@ class CameraViewModel(
     cleanupSession()
     audioInputHandler.cleanup()
     videoRecorder.close()
+    voiceController.close()
     faceDetector.close()
   }
 

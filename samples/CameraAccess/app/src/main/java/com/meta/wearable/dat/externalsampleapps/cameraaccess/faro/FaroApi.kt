@@ -59,6 +59,33 @@ object FaroApi {
       null
     }
   }
+
+  /** Posts an emergency alert to the care network. Returns true when the backend accepted it. */
+  fun sendAlert(kind: String, spokenMessage: String, explicitHelpRequest: Boolean): Boolean {
+    return try {
+      val connection = URL("$BASE/v1/emergency-alerts").openConnection() as HttpURLConnection
+      connection.requestMethod = "POST"
+      connection.doOutput = true
+      connection.connectTimeout = 8000
+      connection.readTimeout = 8000
+      connection.setRequestProperty("Authorization", "Bearer $TOKEN")
+      connection.setRequestProperty("Content-Type", "application/json")
+      val body =
+          JSONObject()
+              .put("kind", kind)
+              .put("spoken_message", spokenMessage)
+              .put("explicit_help_request", explicitHelpRequest)
+              .toString()
+      connection.outputStream.use { it.write(body.toByteArray()) }
+      val accepted = connection.responseCode in 200..299
+      Log.i("FaroApi", "alert $kind -> HTTP ${connection.responseCode}")
+      connection.disconnect()
+      accepted
+    } catch (error: Exception) {
+      Log.w("FaroApi", "sendAlert failed: ${error.message}")
+      false
+    }
+  }
 }
 
 object FaroSpeaker {
