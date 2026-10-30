@@ -10,9 +10,16 @@ import org.json.JSONObject
 
 object FaroApi {
   const val BASE = "https://d2n7ih9kfxbzvd.cloudfront.net"
-  const val TOKEN = "local-development-only"
 
-  fun recognize(frames: List<ByteArray>): JSONObject? {
+  /** Device credential obtained at pairing; never a hardcoded fallback. */
+  fun token(context: Context): String = FaroPairing.credential(context)
+
+  fun recognize(context: Context, frames: List<ByteArray>): JSONObject? {
+    val token = token(context)
+    if (token.isBlank()) {
+      Log.w("FaroApi", "recognize skipped: device not paired")
+      return null
+    }
     return try {
       val boundary = "faro" + System.currentTimeMillis()
       val connection = URL("$BASE/v1/recognitions").openConnection() as HttpURLConnection
@@ -20,7 +27,7 @@ object FaroApi {
       connection.doOutput = true
       connection.connectTimeout = 15000
       connection.readTimeout = 30000
-      connection.setRequestProperty("Authorization", "Bearer $TOKEN")
+      connection.setRequestProperty("Authorization", "Bearer $token")
       connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
       connection.outputStream.use { out ->
         frames.forEachIndexed { index, bytes ->
@@ -57,6 +64,43 @@ object FaroApi {
     } catch (error: Exception) {
       Log.w("FaroApi", "claim failed: ${error.message}")
       null
+    }
+  }
+
+  /** Posts an emergency alert to the care network. Returns true when the backend accepted it. */
+  fun sendAlert(
+      context: Context,
+      kind: String,
+      spokenMessage: String,
+      explicitHelpRequest: Boolean
+  ): Boolean {
+    val token = token(context)
+    if (token.isBlank()) {
+      Log.w("FaroApi", "sendAlert skipped: device not paired")
+      return false
+    }
+    return try {
+      val connection = URL("$BASE/v1/emergency-alerts").openConnection() as HttpURLConnection
+      connection.requestMethod = "POST"
+      connection.doOutput = true
+      connection.connectTimeout = 8000
+      connection.readTimeout = 8000
+      connection.setRequestProperty("Authorization", "Bearer $token")
+      connection.setRequestProperty("Content-Type", "application/json")
+      val body =
+          JSONObject()
+              .put("kind", kind)
+              .put("spoken_message", spokenMessage)
+              .put("explicit_help_request", explicitHelpRequest)
+              .toString()
+      connection.outputStream.use { it.write(body.toByteArray()) }
+      val accepted = connection.responseCode in 200..299
+      Log.i("FaroApi", "alert $kind -> HTTP ${connection.responseCode}")
+      connection.disconnect()
+      accepted
+    } catch (error: Exception) {
+      Log.w("FaroApi", "sendAlert failed: ${error.message}")
+      false
     }
   }
 }

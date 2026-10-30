@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -50,6 +51,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -82,6 +84,7 @@ import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.camera.CameraUiState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.camera.CameraViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.VoiceConnectionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 
 // Scrims behind the top/bottom bars so the white controls stay legible over the live feed. Hoisted
@@ -158,6 +161,7 @@ fun CameraScreen(
           onCapturePhoto = cameraViewModel::capturePhoto,
           onToggleRecording = { cameraViewModel.toggleRecording(onRequestRecordAudioPermission) },
           onToggleMic = cameraViewModel::toggleMic,
+          onToggleVoice = cameraViewModel::toggleVoice,
           onUpdateFirmware = { activity?.let { wearablesViewModel.openFirmwareUpdate(it) } },
       )
     }
@@ -188,6 +192,15 @@ fun CameraScreen(
               Text(stringResource(R.string.camera_permission_cancel))
             }
           },
+      )
+    }
+
+    if (ui.showPairingDialog) {
+      PairingDialog(
+          busy = ui.pairingBusy,
+          error = ui.pairingError,
+          onConfirm = cameraViewModel::submitPairing,
+          onDismiss = cameraViewModel::dismissPairing,
       )
     }
   }
@@ -364,6 +377,14 @@ private fun TopBar(
           active = ui.isStreaming,
           present = ui.hasStream,
       )
+      if (ui.voiceState != VoiceConnectionState.STOPPED) {
+        StatusChip(
+            label = stringResource(R.string.status_voice),
+            value = ui.voiceState.name.lowercase(),
+            active = ui.voiceState == VoiceConnectionState.LISTENING,
+            present = true,
+        )
+      }
     }
 
     Spacer(modifier = Modifier.weight(1f))
@@ -422,6 +443,7 @@ private fun BottomBar(
     onCapturePhoto: () -> Unit,
     onToggleRecording: () -> Unit,
     onToggleMic: () -> Unit,
+    onToggleVoice: () -> Unit,
     onUpdateFirmware: () -> Unit,
 ) {
   Column(
@@ -446,6 +468,7 @@ private fun BottomBar(
           onCapturePhoto = onCapturePhoto,
           onToggleRecording = onToggleRecording,
           onToggleMic = onToggleMic,
+          onToggleVoice = onToggleVoice,
       )
       AnchoredPrimaryButton(
           ui = ui,
@@ -465,6 +488,7 @@ private fun CaptureRow(
     onCapturePhoto: () -> Unit,
     onToggleRecording: () -> Unit,
     onToggleMic: () -> Unit,
+    onToggleVoice: () -> Unit,
 ) {
   // previewActive mirrors iOS `previewIsActive`: live, recording, or tearing down. PAUSED is
   // excluded, so while paused the pill reverts to the (inert) start affordance instead of a live
@@ -523,6 +547,24 @@ private fun CaptureRow(
         enabled = micEnabled,
         tint = if (ui.includeAudioInStream) Color.White else Color.White.copy(alpha = 0.45f),
         onClick = onToggleMic,
+    )
+
+    // Realtime voice conversation (KAN-112).
+    CircleIconButton(
+        modifier = Modifier.testTag("voice_toggle"),
+        icon = Icons.Filled.Headset,
+        contentDescription =
+            if (ui.voiceState == VoiceConnectionState.LISTENING) stringResource(R.string.voice_stop)
+            else stringResource(R.string.voice_start),
+        enabled = true,
+        tint =
+            when (ui.voiceState) {
+              VoiceConnectionState.LISTENING -> AppColor.Green
+              VoiceConnectionState.CONNECTING -> AppColor.Yellow
+              VoiceConnectionState.ERROR -> AppColor.Red
+              VoiceConnectionState.STOPPED -> Color.White
+            },
+        onClick = onToggleVoice,
     )
   }
 }
@@ -703,4 +745,46 @@ private fun UpdateRequiredMessage(modifier: Modifier = Modifier) {
       )
     }
   }
+}
+
+@Composable
+private fun PairingDialog(
+    busy: Boolean,
+    error: String?,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+  var code by remember { mutableStateOf("") }
+  AlertDialog(
+      onDismissRequest = onDismiss,
+      title = { Text(stringResource(R.string.pairing_title)) },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Text(stringResource(R.string.pairing_message))
+          OutlinedTextField(
+              value = code,
+              onValueChange = { value ->
+                code = value.filter { it.isLetterOrDigit() }.take(8).uppercase()
+              },
+              singleLine = true,
+              label = { Text(stringResource(R.string.pairing_code_hint)) },
+              enabled = !busy,
+              modifier = Modifier.testTag("pairing_code_field"),
+          )
+          if (error != null) {
+            Text(text = error, color = AppColor.Red, fontSize = 14.sp)
+          }
+        }
+      },
+      confirmButton = {
+        TextButton(onClick = { onConfirm(code) }, enabled = !busy && code.length == 8) {
+          Text(stringResource(R.string.pairing_confirm))
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = onDismiss, enabled = !busy) {
+          Text(stringResource(R.string.pairing_cancel))
+        }
+      },
+  )
 }
