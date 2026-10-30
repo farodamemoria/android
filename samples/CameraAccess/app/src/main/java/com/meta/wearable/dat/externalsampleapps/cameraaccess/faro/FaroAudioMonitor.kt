@@ -1,6 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.faro
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -76,6 +77,7 @@ object FaroAudioMonitor {
     record = null
   }
 
+  @SuppressLint("MissingPermission")
   private fun loop(context: Context) {
     val bufferSize = AudioRecord.getMinBufferSize(
         SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -200,6 +202,11 @@ object FaroAudioMonitor {
 
   private fun sendVoiceIntent(pcm: ByteArray, peak: Int, loudMs: Int) {
     val wav = toWav(pcm)
+    val token = appContext?.let { FaroPairing.credential(it) }.orEmpty()
+    if (token.isBlank()) {
+      Log.w(TAG, "Sin credencial de emparejamiento; no se envía la intención de voz")
+      return
+    }
     thread {
       try {
         val boundary = "faro" + System.currentTimeMillis()
@@ -208,7 +215,7 @@ object FaroAudioMonitor {
         connection.doOutput = true
         connection.connectTimeout = 10000
         connection.readTimeout = 30000
-        connection.setRequestProperty("Authorization", "Bearer ${FaroApi.TOKEN}")
+        connection.setRequestProperty("Authorization", "Bearer $token")
         connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         connection.outputStream.use { out ->
           out.write("--$boundary\r\n".toByteArray())
@@ -253,6 +260,11 @@ object FaroAudioMonitor {
     val message =
         if (signal == "fall") "Faro: posible caída o golpe fuerte detectado."
         else "Faro: se han detectado varios episodios de tos."
+    val token = appContext?.let { FaroPairing.credential(it) }.orEmpty()
+    if (token.isBlank()) {
+      Log.w(TAG, "Sin credencial de emparejamiento; no se envía el aviso $signal")
+      return
+    }
     thread {
       try {
         val connection = URL("${FaroApi.BASE}/v1/emergency-alerts").openConnection() as HttpURLConnection
@@ -260,7 +272,7 @@ object FaroAudioMonitor {
         connection.doOutput = true
         connection.connectTimeout = 8000
         connection.readTimeout = 8000
-        connection.setRequestProperty("Authorization", "Bearer ${FaroApi.TOKEN}")
+        connection.setRequestProperty("Authorization", "Bearer $token")
         connection.setRequestProperty("Content-Type", "application/json")
         val body =
             "{\"kind\":\"$kind\",\"spoken_message\":\"$message\",\"explicit_help_request\":true}"

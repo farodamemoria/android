@@ -82,6 +82,7 @@ dependencies {
   implementation(libs.mwdat.mockdevice)
   implementation("com.google.mlkit:face-detection:16.1.7")
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
+  testImplementation("junit:junit:4.13.2")
   androidTestImplementation(libs.androidx.ui.test.junit4)
   androidTestImplementation(libs.androidx.test.uiautomator)
   androidTestImplementation(libs.androidx.test.rules)

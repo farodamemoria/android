@@ -17,16 +17,20 @@ import org.json.JSONArray
 
 object FaroNotify {
   private const val BASE = "https://d2n7ih9kfxbzvd.cloudfront.net"
-  private const val TOKEN = "local-development-only"
 
-  fun post(path: String) {
+  fun post(context: Context, path: String) {
+    val token = FaroPairing.credential(context)
+    if (token.isBlank()) {
+      Log.w("FaroNotify", "post skipped: device not paired")
+      return
+    }
     Thread {
           try {
             val connection = URL(BASE + path).openConnection() as HttpURLConnection
             connection.requestMethod = "POST"
             connection.connectTimeout = 15000
             connection.doOutput = true
-            connection.setRequestProperty("Authorization", "Bearer $TOKEN")
+            connection.setRequestProperty("Authorization", "Bearer $token")
             connection.setRequestProperty("Content-Type", "application/json")
             connection.outputStream.write("{}".toByteArray())
             connection.responseCode
@@ -37,7 +41,7 @@ object FaroNotify {
         .start()
   }
 
-  fun notWorn() = post("/v1/glasses/not-worn")
+  fun notWorn(context: Context) = post(context, "/v1/glasses/not-worn")
 }
 
 class FaroReminderService : Service() {
@@ -61,8 +65,13 @@ class FaroReminderService : Service() {
     Thread {
           while (running) {
             try {
+              val token = FaroPairing.credential(applicationContext)
+              if (token.isBlank()) {
+                Thread.sleep(5000L)
+                continue
+              }
               val connection = URL("$BASE/v1/voice-reminders").openConnection() as HttpURLConnection
-              connection.setRequestProperty("Authorization", "Bearer $TOKEN")
+              connection.setRequestProperty("Authorization", "Bearer $token")
               if (connection.responseCode == 200) {
                 val body = connection.inputStream.bufferedReader().use(BufferedReader::readText)
                 val reminders = JSONArray(body)
@@ -91,7 +100,6 @@ class FaroReminderService : Service() {
 
   companion object {
     const val BASE = "https://d2n7ih9kfxbzvd.cloudfront.net"
-    const val TOKEN = "local-development-only"
 
     fun start(context: Context) {
       runCatching {
