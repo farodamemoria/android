@@ -346,7 +346,7 @@ class OpenAiVoiceController(
             .put("message", message)
             .toString()
     if (socket?.send(event) != true) {
-      fail("Non foi posible confirmar o aviso familiar")
+      fail("No ha sido posible confirmar el aviso familiar")
     }
   }
 
@@ -364,11 +364,11 @@ class OpenAiVoiceController(
             .put("call_id", callId)
             .put("success", success)
             .put("status", status ?: "unavailable")
-            .put("message", message ?: "Non puiden comprobar onde estás")
+            .put("message", message ?: "No he podido comprobar dónde estás")
     if (!placeLabel.isNullOrBlank()) event.put("place_label", placeLabel)
     if (accuracyMeters != null) event.put("accuracy_meters", accuracyMeters)
     if (socket?.send(event.toString()) != true) {
-      fail("Non foi posible devolver a localización verificada")
+      fail("No ha sido posible devolver la ubicación verificada")
     }
   }
 
@@ -388,7 +388,7 @@ class OpenAiVoiceController(
             .put("message", message)
     if (!displayName.isNullOrBlank()) event.put("display_name", displayName)
     if (socket?.send(event.toString()) != true) {
-      fail("Non foi posible devolver a identificación")
+      fail("No ha sido posible devolver la identificación")
     }
   }
 

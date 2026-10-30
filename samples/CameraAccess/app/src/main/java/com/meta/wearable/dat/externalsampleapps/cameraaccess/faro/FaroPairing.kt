@@ -51,9 +51,9 @@ object FaroPairing {
    * user-facing error message on failure. Blocking: call from a background dispatcher.
    */
   fun claim(context: Context, code: String): String? {
-    val result = FaroApi.claim(code.trim()) ?: return "Non foi posible validar o código"
+    val result = FaroApi.claim(code.trim()) ?: return "No ha sido posible validar el código"
     val credential = result.optString("device_credential")
-    if (credential.isBlank()) return "O servidor non devolveu credencial"
+    if (credential.isBlank()) return "El servidor no devolvió credencial"
     save(context, credential, result.optString("care_circle_id"), result.optString("role"))
     return null
   }

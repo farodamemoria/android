@@ -187,7 +187,7 @@ class CameraViewModel(
         if (jpeg != null) {
           voiceController.submitCameraImage(request.callId, jpeg)
         } else {
-          voiceController.submitCameraError(request.callId, "Non puiden capturar a imaxe das gafas")
+          voiceController.submitCameraError(request.callId, "No he podido capturar la imagen de las gafas")
         }
       }
     }
@@ -196,7 +196,7 @@ class CameraViewModel(
         val frames = captureRecognitionFrames()
         val result =
             if (frames.size >= RECOGNITION_FRAME_COUNT) {
-              withContext(Dispatchers.IO) { FaroApi.recognize(frames) }
+              withContext(Dispatchers.IO) { FaroApi.recognize(getApplication(), frames) }
             } else {
               null
             }
@@ -220,10 +220,10 @@ class CameraViewModel(
                   request.callId,
                   false,
                   "review_required",
-                  "Non estou seguro de quen é; queda pendente de revisión")
+                  "No estoy seguro de quién es; queda pendiente de revisión")
           else ->
               voiceController.submitFaceRecognitionResult(
-                  request.callId, false, "unknown", "Non puiden recoñecer a ninguén")
+                  request.callId, false, "unknown", "No he podido reconocer a nadie")
         }
       }
     }
@@ -231,14 +231,14 @@ class CameraViewModel(
       voiceController.familyHelpRequests.collect { request ->
         val success =
             withContext(Dispatchers.IO) {
-              FaroApi.sendAlert(request.kind, request.spokenMessage, true)
+              FaroApi.sendAlert(getApplication(), request.kind, request.spokenMessage, true)
             }
         if (success) {
           FaroSpeaker.speak(getApplication(), "Xa avisei á familia")
           voiceController.submitFamilyHelpResult(request.callId, true, "Xa avisei á familia")
         } else {
           voiceController.submitFamilyHelpResult(
-              request.callId, false, "Non puiden avisar á familia")
+              request.callId, false, "No he podido avisar a la familia")
         }
       }
     }
@@ -249,7 +249,7 @@ class CameraViewModel(
             request.callId,
             false,
             "unavailable",
-            "Non podo comprobar onde estás agora mesmo")
+            "No puedo comprobar dónde estás ahora mismo")
       }
     }
   }
@@ -379,7 +379,7 @@ class CameraViewModel(
       session.state.collect { state ->
         _uiState.update { it.copy(sessionState = state) }
         if (state == DeviceSessionState.PAUSED) {
-          FaroNotify.notWorn()
+          FaroNotify.notWorn(getApplication())
         }
         if (state == DeviceSessionState.STOPPED) {
           cleanupSession()
@@ -418,7 +418,7 @@ class CameraViewModel(
               Log.d(TAG, "Recognition skipped: ${frames.size} frames with face")
               continue
             }
-            val result = withContext(Dispatchers.IO) { FaroApi.recognize(frames) }
+            val result = withContext(Dispatchers.IO) { FaroApi.recognize(getApplication(), frames) }
             Log.d(TAG, "Recognition result: ${result?.optString("status") ?: "no-response"} conf=${result?.optDouble("confidence")} reason=${result?.optString("reason")}")
             when (result?.optString("status")) {
               "confirmed" -> {
