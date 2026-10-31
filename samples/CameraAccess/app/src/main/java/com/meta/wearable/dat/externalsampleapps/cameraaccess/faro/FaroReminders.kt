@@ -16,7 +16,7 @@ import java.net.URL
 import org.json.JSONArray
 
 object FaroNotify {
-  private const val BASE = "https://d2n7ih9kfxbzvd.cloudfront.net"
+  private val BASE = FaroApi.BASE
 
   fun post(context: Context, path: String) {
     val token = FaroPairing.credential(context)
@@ -99,7 +99,7 @@ class FaroReminderService : Service() {
   override fun onBind(intent: Intent?): IBinder? = null
 
   companion object {
-    const val BASE = "https://d2n7ih9kfxbzvd.cloudfront.net"
+    val BASE = FaroApi.BASE
 
     fun start(context: Context) {
       runCatching {

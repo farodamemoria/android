@@ -127,14 +127,15 @@ class OpenAiVoiceController(
         override fun onMessage(webSocket: WebSocket, text: String) {
           synchronized(this@OpenAiVoiceController) {
             if (!running.get() || socket !== webSocket) return
-            when {
-              text.startsWith(AUDIO_START_PREFIX) -> handleAudioStart(text)
-              text == AUDIO_CLEAR -> handleAudioClear(webSocket)
-              text.startsWith(ERROR_PREFIX) -> fail(text.removePrefix(ERROR_PREFIX))
-              text.startsWith(CAMERA_REQUEST_PREFIX) -> handleCameraRequest(text)
-              text.startsWith(FAMILY_HELP_REQUEST_PREFIX) -> handleFamilyHelpRequest(text)
-              text.startsWith(LOCATION_ANSWER_REQUEST_PREFIX) -> handleLocationRequest(text)
-              text.startsWith(FACE_RECOGNITION_REQUEST_PREFIX) -> handleFaceRecognitionRequest(text)
+            when (val event = VoiceProtocol.parse(text)) {
+              is VoiceEvent.AudioStart -> handleAudioStart(event.payload)
+              VoiceEvent.AudioClear -> handleAudioClear(webSocket)
+              is VoiceEvent.Error -> fail(event.message)
+              is VoiceEvent.CameraRequest -> handleCameraRequest(event.payload)
+              is VoiceEvent.FamilyHelpRequest -> handleFamilyHelpRequest(event.payload)
+              is VoiceEvent.LocationAnswerRequest -> handleLocationRequest(event.payload)
+              is VoiceEvent.FaceRecognitionRequest -> handleFaceRecognitionRequest(event.payload)
+              VoiceEvent.Ignored -> Log.d(TAG, "Realtime event ignored: ${text.take(80)}")
             }
           }
         }
@@ -142,7 +143,11 @@ class OpenAiVoiceController(
         override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
           synchronized(this@OpenAiVoiceController) {
             if (running.get() && socket === webSocket) {
-              scheduleReconnect(error.message ?: "unknown error")
+              if (response?.code == HTTP_UNAUTHORIZED) {
+                endSession(AUTH_FAILED_MESSAGE)
+              } else {
+                scheduleReconnect(error.message ?: "unknown error")
+              }
             }
           }
         }
@@ -151,15 +156,19 @@ class OpenAiVoiceController(
           synchronized(this@OpenAiVoiceController) {
             Log.i(TAG, "Realtime voice disconnected; code=$code, reason=$reason")
             if (running.get() && socket === webSocket) {
-              scheduleReconnect("connection closed")
+              when (code) {
+                CLOSE_UNAUTHORIZED -> endSession(AUTH_FAILED_MESSAGE)
+                CLOSE_DUPLICATE_SESSION -> endSession(DUPLICATE_SESSION_MESSAGE)
+                else -> scheduleReconnect("connection closed")
+              }
             }
           }
         }
       }
 
-  private fun handleAudioStart(text: String) {
-    val payload = runCatching { JSONObject(text.removePrefix(AUDIO_START_PREFIX)) }.getOrNull() ?: return
-    playback?.begin(payload.optString("item_id"), payload.optInt("content_index"))
+  private fun handleAudioStart(payload: String) {
+    val start = runCatching { JSONObject(payload) }.getOrNull() ?: return
+    playback?.begin(start.optString("item_id"), start.optInt("content_index"))
   }
 
   private fun handleAudioClear(webSocket: WebSocket) {
@@ -177,51 +186,41 @@ class OpenAiVoiceController(
     }
   }
 
-  private fun handleCameraRequest(text: String) {
-    val payload =
-        runCatching { JSONObject(text.removePrefix(CAMERA_REQUEST_PREFIX)) }.getOrNull()
+  private fun handleCameraRequest(payload: String) {
+    val json = runCatching { JSONObject(payload) }.getOrNull()
     val callId =
-        payload?.optString("call_id")?.takeIf { it.isNotBlank() }
-            ?: text.removePrefix(CAMERA_REQUEST_PREFIX).trim()
-    val safety = payload?.optString("purpose") == "safety"
+        json?.optString("call_id")?.takeIf { it.isNotBlank() } ?: payload.trim()
+    val safety = json?.optString("purpose") == "safety"
     Log.i(TAG, "Realtime requested glasses camera; callId=$callId, safety=$safety")
     if (callId.isNotBlank()) {
       _cameraRequests.tryEmit(CameraCaptureRequest(callId, safety))
     }
   }
 
-  private fun handleFamilyHelpRequest(text: String) {
-    val payload =
-        runCatching { JSONObject(text.removePrefix(FAMILY_HELP_REQUEST_PREFIX)) }.getOrNull()
-            ?: return
-    val callId = payload.optString("call_id")
+  private fun handleFamilyHelpRequest(payload: String) {
+    val json = runCatching { JSONObject(payload) }.getOrNull() ?: return
+    val callId = json.optString("call_id")
     if (!callId.isBlank()) {
       _familyHelpRequests.tryEmit(
           FamilyHelpRequest(
               callId,
-              payload.optString("kind", "episode"),
-              payload.optString("spoken_message", "A persoa pediu axuda"),
+              json.optString("kind", "episode"),
+              json.optString("spoken_message", "A persoa pediu axuda"),
           )
       )
     }
   }
 
-  private fun handleLocationRequest(text: String) {
-    val payload =
-        runCatching { JSONObject(text.removePrefix(LOCATION_ANSWER_REQUEST_PREFIX)) }.getOrNull()
-            ?: return
-    val callId = payload.optString("call_id")
-    if (!callId.isBlank()) {
+  private fun handleLocationRequest(payload: String) {
+    val callId = runCatching { JSONObject(payload).optString("call_id") }.getOrNull()
+    if (!callId.isNullOrBlank()) {
       _currentLocationRequests.tryEmit(CurrentLocationRequest(callId))
     }
   }
 
-  private fun handleFaceRecognitionRequest(text: String) {
-    val payload =
-        runCatching { JSONObject(text.removePrefix(FACE_RECOGNITION_REQUEST_PREFIX)) }.getOrNull()
-            ?: return
-    val callId = payload.optString("call_id")
-    if (!callId.isBlank()) {
+  private fun handleFaceRecognitionRequest(payload: String) {
+    val callId = runCatching { JSONObject(payload).optString("call_id") }.getOrNull()
+    if (!callId.isNullOrBlank()) {
       _faceRecognitionRequests.tryEmit(FaceRecognitionRequest(callId))
     }
   }
@@ -295,6 +294,27 @@ class OpenAiVoiceController(
     stop()
     httpClient.dispatcher.executorService.shutdown()
     httpClient.connectionPool.evictAll()
+  }
+
+  /**
+   * Ends the session without reconnecting: the backend rejected the device credential (close code
+   * 4401 / HTTP 401) or another session is already active (close code 4000). Retrying would loop.
+   */
+  @Synchronized
+  private fun endSession(message: String) {
+    running.set(false)
+    socket = null
+    reconnectHandler.removeCallbacksAndMessages(null)
+    reconnectAttempt = 0
+    captureThread?.interrupt()
+    runCatching { captureThread?.join(1000) }
+    captureThread = null
+    releaseAudio()
+    audioManager?.clearCommunicationDevice()
+    audioManager?.mode = AudioManager.MODE_NORMAL
+    Log.e(TAG, message)
+    _error.value = message
+    _state.value = VoiceConnectionState.ERROR
   }
 
   @Synchronized
@@ -390,24 +410,6 @@ class OpenAiVoiceController(
     if (socket?.send(event.toString()) != true) {
       fail("No ha sido posible devolver la identificación")
     }
-  }
-
-  fun requestVisionAudit(): Boolean {
-    val event = JSONObject().put("type", "vision_audit_request").toString()
-    val sent = socket?.send(event) == true
-    Log.i(TAG, "Vision audit request sent=$sent")
-    return sent
-  }
-
-  fun submitLiveVisionFrame(jpegBytes: ByteArray, sequence: Long): Boolean {
-    val message =
-        JSONObject()
-            .put("type", "stream_frame")
-            .put("sequence", sequence)
-            .put("mime_type", "image/jpeg")
-            .put("data", Base64.encodeToString(jpegBytes, Base64.NO_WRAP))
-            .toString()
-    return socket?.send(message) == true
   }
 
   private fun initializeAudio(): Boolean {
@@ -560,17 +562,21 @@ class OpenAiVoiceController(
     const val SAMPLE_RATE = 24000
 
     private const val CAPTURE_CHUNK_BYTES = 2400
-    private const val REALTIME_URL = "wss://d2n7ih9kfxbzvd.cloudfront.net/realtime"
+
+    // Stable CNAME of the Faro backend. The previous CloudFront distribution domain stopped
+    // resolving after the AWS migration, so it must not be used again.
+    private const val REALTIME_URL = "wss://api.loginea.com/realtime"
 
     private const val PERMISSION_RECORD_AUDIO = "android.permission.RECORD_AUDIO"
     private const val PERMISSION_BLUETOOTH_CONNECT = "android.permission.BLUETOOTH_CONNECT"
 
-    private const val AUDIO_START_PREFIX = "AUDIO_START:"
-    private const val AUDIO_CLEAR = "AUDIO_CLEAR"
-    private const val ERROR_PREFIX = "ERROR:"
-    private const val CAMERA_REQUEST_PREFIX = "CAMERA_REQUEST:"
-    private const val FAMILY_HELP_REQUEST_PREFIX = "FAMILY_HELP_REQUEST:"
-    private const val LOCATION_ANSWER_REQUEST_PREFIX = "LOCATION_ANSWER_REQUEST:"
-    private const val FACE_RECOGNITION_REQUEST_PREFIX = "FACE_RECOGNITION_REQUEST:"
+    private const val HTTP_UNAUTHORIZED = 401
+    private const val CLOSE_DUPLICATE_SESSION = 4000
+    private const val CLOSE_UNAUTHORIZED = 4401
+
+    private const val AUTH_FAILED_MESSAGE =
+        "Las gafas no están autorizadas: vuelve a emparejarlas con Faro"
+    private const val DUPLICATE_SESSION_MESSAGE =
+        "Ya hay una conversación de Faro activa en este dispositivo"
   }
 }

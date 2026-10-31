@@ -210,7 +210,7 @@ class CameraViewModel(
                   name.isNotEmpty() && relationship.isNotEmpty() ->
                       "Esta persona es $name, $relationship."
                   name.isNotEmpty() -> "Esta persona es $name."
-                  else -> "Reconecín a esta persoa."
+                  else -> "He reconocido a esta persona."
                 }
             voiceController.submitFaceRecognitionResult(
                 request.callId, true, "confirmed", message, name.ifBlank { null })
@@ -293,7 +293,7 @@ class CameraViewModel(
   fun submitPairing(code: String) {
     val clean = code.trim()
     if (clean.length != 8) {
-      _uiState.update { it.copy(pairingError = "O código ten 8 caracteres") }
+      _uiState.update { it.copy(pairingError = "El código debe tener 8 caracteres") }
       return
     }
     _uiState.update { it.copy(pairingBusy = true, pairingError = null) }
@@ -307,7 +307,7 @@ class CameraViewModel(
             isPaired = FaroPairing.isPaired(getApplication()))
       }
       if (error == null) {
-        FaroSpeaker.speak(getApplication(), "Dispositivo emparellado con Faro")
+        FaroSpeaker.speak(getApplication(), "Dispositivo emparejado con Faro")
       }
     }
   }
