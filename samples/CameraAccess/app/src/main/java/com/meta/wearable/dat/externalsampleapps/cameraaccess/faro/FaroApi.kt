@@ -9,7 +9,9 @@ import java.util.Locale
 import org.json.JSONObject
 
 object FaroApi {
-  const val BASE = "https://d2n7ih9kfxbzvd.cloudfront.net"
+  // Stable CNAME of the AURA backend (CloudFront). The previous distribution domain stopped
+  // resolving after the AWS migration, so it must not be used again.
+  const val BASE = "https://api.loginea.com"
 
   /** Device credential obtained at pairing; never a hardcoded fallback. */
   fun token(context: Context): String = FaroPairing.credential(context)
