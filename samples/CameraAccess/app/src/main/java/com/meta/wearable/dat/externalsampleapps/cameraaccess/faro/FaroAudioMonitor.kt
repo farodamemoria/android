@@ -26,22 +26,21 @@ object FaroAudioMonitor {
   private const val SAMPLE_RATE = 16000
   private const val FRAME_MS = 20
   private const val FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS / 1000
-  private const val IMPACT_RMS = 9000.0
-  private const val IMPACT_FACTOR = 6.0
-  private const val COUGH_RMS = 3000.0
-  private const val IMPACT_COOLDOWN_MS = 30000L
-  private const val COUGH_COOLDOWN_MS = 30000L
   private const val SPEECH_RMS = 450.0
   private const val SPEECH_SILENCE_MS = 700L
   private const val SPEECH_MAX_MS = 6000L
   private const val SPEECH_MIN_MS = 700L
   private const val SPEECH_COOLDOWN_MS = 3000L
+  private const val TICK_MS = 5000L
+  private const val CHECK_IN_QUESTION = "\u00bfEst\u00e1s bien?"
 
   @Volatile private var running = false
+  @Volatile private var awaitingCheckIn = false
+  private var lastTickAt = 0L
+  private var detector: AcousticPatternDetector? = null
+  private var reporter: AcousticReporter? = null
   private var worker: Thread? = null
   private var record: AudioRecord? = null
-  private var lastImpactAt = 0L
-  private var lastCoughAt = 0L
   private var appContext: Context? = null
 
   fun start(context: Context) {
@@ -54,6 +53,8 @@ object FaroAudioMonitor {
       return
     }
     running = true
+    detector = AcousticPatternDetector()
+    reporter = AcousticReporter(FaroApi.BASE, FaroPairing.credential(app))
     worker = thread(name = "FaroAudioMonitor") { loop(app) }
   }
 
@@ -71,6 +72,9 @@ object FaroAudioMonitor {
 
   fun stop() {
     running = false
+    awaitingCheckIn = false
+    detector = null
+    reporter = null
     worker?.interrupt()
     worker = null
     record?.let { runCatching { it.stop() }; runCatching { it.release() } }
@@ -120,10 +124,7 @@ object FaroAudioMonitor {
       audioRecord.startRecording()
       Log.i(TAG, "Micrófono en uso: ${audioRecord.routedDevice?.productName} (${audioRecord.routedDevice?.type})")
       val samples = ShortArray(FRAME_SAMPLES)
-      var ambient = 100.0
-      var coughBurstAt = 0L
       var lastLogAt = 0L
-      var previousRms = 0.0
       var speech = java.io.ByteArrayOutputStream()
       var speechStart = 0L
       var speechPeak = 0.0
@@ -147,13 +148,13 @@ object FaroAudioMonitor {
           previous = value
         }
         val rms = sqrt(sum / samples.size)
-        ambient = ambient * 0.98 + rms * 0.02
         val now = System.currentTimeMillis()
         if (now - lastLogAt > 1000) {
-          Log.d(TAG, "rms=${rms.toInt()} ambiente=${ambient.toInt()} cruces=$crossings")
+          Log.d(TAG, "rms=${rms.toInt()} cruces=$crossings")
           lastLogAt = now
         }
-        previousRms = rms
+        detector?.feed(rms, now)?.let { detection -> dispatchDetection(context, detection) }
+        maybeTick(context, now)
         if (rms > SPEECH_RMS || speech.size() > 0) {
           if (speech.size() == 0) {
             speechStart = now
@@ -255,32 +256,36 @@ object FaroAudioMonitor {
     return out.toByteArray()
   }
 
-  private fun sendDetection(signal: String) {
-    val kind = if (signal == "fall") "hazard" else "episode"
-    val message =
-        if (signal == "fall") "Faro: posible caída o golpe fuerte detectado."
-        else "Faro: se han detectado varios episodios de tos."
-    val token = appContext?.let { FaroPairing.credential(it) }.orEmpty()
-    if (token.isBlank()) {
-      Log.w(TAG, "Sin credencial de emparejamiento; no se envía el aviso $signal")
-      return
+  private fun dispatchDetection(context: Context, detection: AcousticPatternDetector.Detection) {
+    val active = reporter ?: return
+    thread(name = "FaroAcoustic") {
+      val outcome = active.report(detection.signal, detection.confidence) ?: return@thread
+      Log.i(TAG, "Acustico ${detection.signal} (${detection.confidence}) -> ${outcome.action}")
+      when (outcome.action) {
+        "ask" -> {
+          awaitingCheckIn = true
+          FaroSpeaker.speak(context, outcome.question ?: CHECK_IN_QUESTION)
+        }
+        "escalate" -> {
+          awaitingCheckIn = false
+          Log.i(TAG, "Episodio acustico escalado a la red de cuidados")
+        }
+      }
     }
-    thread {
-      try {
-        val connection = URL("${FaroApi.BASE}/v1/emergency-alerts").openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.doOutput = true
-        connection.connectTimeout = 8000
-        connection.readTimeout = 8000
-        connection.setRequestProperty("Authorization", "Bearer $token")
-        connection.setRequestProperty("Content-Type", "application/json")
-        val body =
-            "{\"kind\":\"$kind\",\"spoken_message\":\"$message\",\"explicit_help_request\":true}"
-        connection.outputStream.use { it.write(body.toByteArray()) }
-        Log.i(TAG, "Aviso $signal ($kind) -> HTTP ${connection.responseCode}")
-        connection.disconnect()
-      } catch (error: Exception) {
-        Log.w(TAG, "No se pudo enviar el aviso $signal: ${error.message}")
+  }
+
+  private fun maybeTick(context: Context, now: Long) {
+    if (!awaitingCheckIn || now - lastTickAt < TICK_MS) return
+    lastTickAt = now
+    val active = reporter ?: return
+    thread(name = "FaroAcousticTick") {
+      val outcome = active.tick() ?: return@thread
+      when (outcome.action) {
+        "ask" -> {
+          awaitingCheckIn = true
+          FaroSpeaker.speak(context, outcome.question ?: CHECK_IN_QUESTION)
+        }
+        "escalate", "closed", "idle" -> awaitingCheckIn = false
       }
     }
   }
