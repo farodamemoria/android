@@ -9,13 +9,17 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 
 /** Servicio en primer plano (tipo microphone) que mantiene la escucha de las gafas en segundo plano. */
 class FaroListeningService : Service() {
+  private var wakeLock: PowerManager.WakeLock? = null
+
   override fun onCreate() {
     super.onCreate()
+    acquireWakeLock()
     val manager = getSystemService(NotificationManager::class.java)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       manager.createNotificationChannel(
@@ -41,7 +45,18 @@ class FaroListeningService : Service() {
 
   override fun onDestroy() {
     FaroAudioMonitor.stop()
+    wakeLock?.let { runCatching { it.release() } }
+    wakeLock = null
     super.onDestroy()
+  }
+
+  /** KAN-35: con la pantalla apagada el microfono debe seguir leyendo; sin este bloqueo el CPU duerme. */
+  private fun acquireWakeLock() {
+    val power = getSystemService(PowerManager::class.java) ?: return
+    val lock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Faro:escucha")
+    lock.setReferenceCounted(false)
+    runCatching { lock.acquire() }
+    wakeLock = lock
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
