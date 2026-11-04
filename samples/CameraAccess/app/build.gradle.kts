@@ -24,8 +24,8 @@ android {
     applicationId = "com.meta.wearable.dat.externalsampleapps.cameraaccess"
     minSdk = 31
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.0+kan191"
+    versionCode = 3
+    versionName = "1.0+kan202"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
