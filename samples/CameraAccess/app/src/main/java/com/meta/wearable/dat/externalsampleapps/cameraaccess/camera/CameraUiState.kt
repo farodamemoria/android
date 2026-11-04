@@ -18,6 +18,7 @@ import android.net.Uri
 import com.meta.wearable.dat.camera.types.StreamState
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.VoiceConnectionState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.VoiceSubtitle
 
 /** A capture awaiting preview/share — a still photo or a recorded video file. */
 sealed interface CapturePreview {
@@ -55,6 +56,8 @@ data class CameraUiState(
     val showPairingDialog: Boolean = false,
     val pairingBusy: Boolean = false,
     val pairingError: String? = null,
+    // KAN-199: subtitulo de la conversacion (Faro o lo escuchado del paciente).
+    val subtitle: VoiceSubtitle? = null,
 ) {
   /** A session exists and is connected (or connecting); a stream can be started. */
   val hasSession: Boolean

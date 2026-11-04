@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <style name="Theme.FaroMobile" parent="android:style/Theme.Material.Light.NoActionBar">
+    <item name="android:fontFamily">sans</item>
+    <item name="android:colorAccent">#C99832</item>
+    <item name="android:navigationBarColor">#F6F0E4</item>
+    <item name="android:statusBarColor">#123F47</item>
+  </style>
+  <color name="ic_launcher_background">#F6F0E4</color>
+</resources>
