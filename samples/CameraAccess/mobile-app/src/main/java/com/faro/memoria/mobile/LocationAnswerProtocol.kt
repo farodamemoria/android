@@ -2,10 +2,12 @@ package com.faro.memoria.mobile
 
 import org.json.JSONObject
 
+data class LocationRequest(val callId: String, val fresh: Boolean)
+
 internal object LocationAnswerProtocol {
   private const val PREFIX = "LOCATION_ANSWER_REQUEST:"
 
-  fun requestCallId(message: String): String? {
+  fun request(message: String): LocationRequest? {
     val payload = when {
       message.startsWith(PREFIX) -> message.removePrefix(PREFIX)
       message.trimStart().startsWith("{") -> message
@@ -14,8 +16,13 @@ internal object LocationAnswerProtocol {
     val json = runCatching { JSONObject(payload) }.getOrNull() ?: return null
     if (!message.startsWith(PREFIX) &&
         json.optString("type").lowercase() != "location_answer_request") return null
-    return json.optString("call_id").trim().takeIf { it.isNotEmpty() && it.length <= 200 }
+    val callId = json.optString("call_id").trim().takeIf { it.isNotEmpty() && it.length <= 200 }
+        ?: return null
+    // KAN-205: `fresh` pide forzar un fix nuevo (GPS/red) en vez de reutilizar el ultimo conocido.
+    return LocationRequest(callId, json.optBoolean("fresh", false))
   }
+
+  fun requestCallId(message: String): String? = request(message)?.callId
 }
 
 internal data class LocationAnswerResult(

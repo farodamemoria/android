@@ -35,10 +35,10 @@ internal class MobileLocationAnswerCoordinator(
   private val closed = AtomicBoolean(false)
   private val activeSignals = Collections.synchronizedList(mutableListOf<CancellationSignal>())
 
-  fun answer(callId: String) {
+  fun answer(callId: String, fresh: Boolean = false) {
     if (callId.isBlank() || closed.get()) return
     worker.execute {
-      val result = runCatching { resolve(callId) }.getOrElse {
+      val result = runCatching { resolve(callId, fresh) }.getOrElse {
         LocationAnswerResult(
             callId,
             "location_unavailable",
@@ -49,7 +49,7 @@ internal class MobileLocationAnswerCoordinator(
     }
   }
 
-  private fun resolve(callId: String): LocationAnswerResult {
+  private fun resolve(callId: String, fresh: Boolean): LocationAnswerResult {
     if (!hasLocationPermission()) {
       return LocationAnswerResult(
           callId,
@@ -65,13 +65,29 @@ internal class MobileLocationAnswerCoordinator(
           "Este móvil debe estar emparejado antes de consultar la ubicación.",
       )
     }
-    val location = recentLastKnownLocation() ?: currentLocation() ?: fallbackLastKnownLocation()
-        ?: return LocationAnswerResult(
-            callId,
-            "location_unavailable",
-            "No consigo obtener tu ubicación ahora. Puedo seguir intentándolo o avisar a tu familiar.",
-        )
+    // KAN-205: si el pipeline pide un fix fresco se intenta primero el GPS actual; si no, se
+    // reutiliza la ultima posicion reciente para responder rapido.
+    val location = if (fresh) {
+      currentLocation() ?: recentLastKnownLocation() ?: fallbackLastKnownLocation()
+    } else {
+      recentLastKnownLocation() ?: currentLocation() ?: fallbackLastKnownLocation()
+    } ?: return LocationAnswerResult(
+        callId,
+        "location_unavailable",
+        "No consigo obtener tu ubicación ahora. Puedo seguir intentándolo o avisar a tu familiar.",
+    )
 
+    val first = postAnswer(callId, credential, location)
+    // KAN-205: el backend ya no responde `refresh_required` (era un callejon sin salida), pero
+    // con versiones antiguas se reintenta una vez forzando un fix nuevo.
+    if (!fresh && first.status == "refresh_required") {
+      val refreshed = currentLocation() ?: fallbackLastKnownLocation() ?: location
+      return postAnswer(callId, credential, refreshed)
+    }
+    return first
+  }
+
+  private fun postAnswer(callId: String, credential: String, location: Location): LocationAnswerResult {
     val recordedAt = location.time.takeIf { it > 0 } ?: System.currentTimeMillis()
     val payload = JSONObject()
         .put("latitude", location.latitude)

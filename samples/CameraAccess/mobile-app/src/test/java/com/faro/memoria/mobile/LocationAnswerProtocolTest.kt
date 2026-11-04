@@ -24,6 +24,21 @@ class LocationAnswerProtocolTest {
     assertNull(LocationAnswerProtocol.requestCallId("LOCATION_ANSWER_REQUEST:{\"call_id\":\"\"}"))
   }
 
+  @Test fun parsesFreshFlagForRetry() {
+    val normal = LocationAnswerProtocol.request(
+        "LOCATION_ANSWER_REQUEST:{\"call_id\":\"call-6\"}",
+    )
+    assertEquals("call-6", normal?.callId)
+    assertEquals(false, normal?.fresh)
+
+    val fresh = LocationAnswerProtocol.request(
+        "LOCATION_ANSWER_REQUEST:{\"call_id\":\"call-7\",\"fresh\":true}",
+    )
+    assertEquals("call-7", fresh?.callId)
+    assertEquals(true, fresh?.fresh)
+    assertNull(LocationAnswerProtocol.request("LOCATION_ANSWER_REQUEST:{\"fresh\":true}"))
+  }
+
   @Test fun serializesRequiredAndOptionalResultFields() {
     val json = JSONObject(
         LocationAnswerResult(

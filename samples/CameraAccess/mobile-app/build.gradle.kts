@@ -10,8 +10,8 @@ android {
     applicationId = "com.faro.memoria.mobile"
     minSdk = 31
     targetSdk = 36
-    versionCode = 9
-    versionName = "0.1-mvp+kan191"
+    versionCode = 10
+    versionName = "0.1-mvp+kan205"
     val realtimeUrl = providers.environmentVariable("FARO_REALTIME_URL").orNull
         ?: "wss://api.loginea.com/realtime"
     val apiUrl = providers.environmentVariable("FARO_API_URL").orNull

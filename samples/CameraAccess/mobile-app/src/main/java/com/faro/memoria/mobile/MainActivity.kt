@@ -141,7 +141,7 @@ class MainActivity : ComponentActivity() {
       { preferences.getString("device_credential", "").orEmpty() },
       { runOnUiThread { status.text = it } },
       { callId -> runOnUiThread { onCameraRequested(callId) } },
-      { callId -> locationAnswers.answer(callId) },
+      { request -> locationAnswers.answer(request.callId, request.fresh) },
       { text -> runOnUiThread { faroSubtitle.text = "Faro: $text"; faroSubtitle.visibility = android.view.View.VISIBLE } },
       { text -> runOnUiThread { userSubtitle.text = "Tú: $text"; userSubtitle.visibility = android.view.View.VISIBLE } },
     )
