@@ -56,6 +56,9 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    if (BuildConfig.DEBUG && intent.getBooleanExtra("faro_test_crash", false)) {
+      throw RuntimeException("Prueba KAN-191 del log de errores")
+    }
     status = TextView(this).apply { text = "Faro está en pausa"; textSize = 20f; setTextColor(Color.rgb(18,63,71)); gravity = Gravity.CENTER }
     userSubtitle = TextView(this).apply {
       textSize = 20f
