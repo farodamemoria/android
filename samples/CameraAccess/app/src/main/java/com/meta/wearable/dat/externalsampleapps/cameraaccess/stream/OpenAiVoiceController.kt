@@ -92,6 +92,12 @@ class OpenAiVoiceController(
   /** KAN-199: ultimo subtitulo de la conversacion (Faro o paciente). */
   private val _subtitle = MutableStateFlow<VoiceSubtitle?>(null)
   val subtitle: StateFlow<VoiceSubtitle?> = _subtitle.asStateFlow()
+  private val subtitleLifetime = FaroSubtitleLifetime()
+  private val subtitleExpiry =
+      Runnable {
+        subtitleLifetime.clear()
+        _subtitle.value = null
+      }
 
   @Volatile private var socket: WebSocket? = null
   @Volatile private var audioRecord: AudioRecord? = null
@@ -141,7 +147,13 @@ class OpenAiVoiceController(
               text.startsWith(FACE_RECOGNITION_REQUEST_PREFIX) -> handleFaceRecognitionRequest(text)
               // KAN-199: subtitulos de lo que dice Faro y de lo que escucha del paciente.
               text.startsWith(FARO_TEXT_PREFIX) || text.startsWith(FARO_USER_TEXT_PREFIX) ->
-                  FaroSubtitleProtocol.parse(text)?.let { _subtitle.value = it }
+                  FaroSubtitleProtocol.parse(text)?.let { subtitle ->
+                    _subtitle.value =
+                        subtitleLifetime.show(subtitle, android.os.SystemClock.elapsedRealtime())
+                    reconnectHandler.removeCallbacks(subtitleExpiry)
+                    reconnectHandler.postDelayed(
+                        subtitleExpiry, FaroSubtitleLifetime.DEFAULT_TTL_MILLIS)
+                  }
             }
           }
         }
@@ -294,6 +306,7 @@ class OpenAiVoiceController(
       releaseAudio()
       audioManager?.clearCommunicationDevice()
       audioManager?.mode = AudioManager.MODE_NORMAL
+      subtitleLifetime.clear()
       _subtitle.value = null
       _state.value = VoiceConnectionState.STOPPED
     }
@@ -308,7 +321,8 @@ class OpenAiVoiceController(
   @Synchronized
   private fun scheduleReconnect(reason: String) {
     releaseAudio()
-    _subtitle.value = null
+    // KAN-201: la banda no se borra al reconectar; se conserva hasta caducar o cambiar de texto.
+    _subtitle.value = subtitleLifetime.onReconnect(android.os.SystemClock.elapsedRealtime())
     socket = null
     if (!running.get()) return
     val delayMillis = min(1000L shl min(reconnectAttempt, 4), 15000L)
