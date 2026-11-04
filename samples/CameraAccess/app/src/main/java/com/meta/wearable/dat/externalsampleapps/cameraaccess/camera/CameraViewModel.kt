@@ -22,6 +22,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.PixelCopy
 import android.view.Surface
@@ -52,8 +53,11 @@ import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.AudioInputHandler
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.BufferedHevcFrame
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.HevcDecoder
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.HevcFrameBuffer
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.HevcParameterSetCollector
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.OffscreenFrameCapturer
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.OpenAiVoiceController
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.RecordingResult
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingService
@@ -70,6 +74,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -92,6 +97,9 @@ class CameraViewModel(
     private const val RECOGNITION_FRAME_GAP_MS = 80L
     private const val RECOGNITION_PREVIEW_TIMEOUT_MS = 2000L
     private const val RECOGNITION_REVIEW_COOLDOWN_MS = 10000L
+    // KAN-202: how long to wait for the DAT stream / a buffered keyframe when Faro asks for a photo.
+    private const val CAPTURE_STREAM_WAIT_MS = 8000L
+    private const val CAPTURE_BUFFER_WAIT_MS = 3000L
   }
 
   private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
@@ -130,6 +138,11 @@ class CameraViewModel(
   // a partial set yields an unfinalizable file ("Missing codec specific data"). Internally
   // synchronized.
   private val csdCollector = HevcParameterSetCollector()
+
+  // KAN-202: newest GOP kept so a still can be decoded offscreen when the UI preview Surface is
+  // gone (app backgrounded / screen off), which is exactly when an alert photo is needed.
+  private val frameBuffer = HevcFrameBuffer()
+  private val offscreenCapturer = OffscreenFrameCapturer()
 
   private var sessionStateJob: Job? = null
   private var sessionErrorJob: Job? = null
@@ -317,18 +330,56 @@ class CameraViewModel(
     }
   }
 
-  /** Captures the live preview as a JPEG for a `CAMERA_REQUEST:`. */
+  /** Captures a fresh JPEG for a `CAMERA_REQUEST:`, independent of the on-screen preview. */
   private suspend fun captureJpegForVoice(): ByteArray? {
+    if (ensureStreamingForCapture()) {
+      waitForBufferedFrame()
+      val frames = bufferedFramesForCapture()
+      if (frameBuffer.hasCapturableFrame()) {
+        offscreenCapturer.capture(latestFrameWidth, latestFrameHeight, frames)?.let { jpeg ->
+          Log.i(TAG, "Glasses photo captured offscreen; jpegBytes=${jpeg.size}")
+          return jpeg
+        }
+      }
+      Log.w(TAG, "Offscreen glasses capture unavailable; falling back to live preview")
+    }
     val bitmap = capturePreviewBitmap() ?: return null
     val jpeg =
         withContext(Dispatchers.Default) {
           java.io.ByteArrayOutputStream().use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
-            out.toByteArray()
+            if (bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)) out.toByteArray() else null
           }
         }
     bitmap.recycle()
     return jpeg
+  }
+
+  /** Starts the DAT stream when Faro asks for a photo and it is not already streaming. */
+  private suspend fun ensureStreamingForCapture(): Boolean {
+    if (_uiState.value.isStreaming) return true
+    if (!_uiState.value.isSessionActive) {
+      Log.w(TAG, "Camera request ignored: DAT session is not active")
+      return false
+    }
+    if (stream == null) startStreaming()
+    val streaming =
+        withTimeoutOrNull(CAPTURE_STREAM_WAIT_MS) { uiState.first { it.isStreaming } } != null
+    if (!streaming) Log.w(TAG, "Camera stream did not start within ${CAPTURE_STREAM_WAIT_MS}ms")
+    return streaming
+  }
+
+  private suspend fun waitForBufferedFrame() {
+    val deadline = SystemClock.elapsedRealtime() + CAPTURE_BUFFER_WAIT_MS
+    while (SystemClock.elapsedRealtime() < deadline && !frameBuffer.hasCapturableFrame()) {
+      delay(40L)
+    }
+  }
+
+  private fun bufferedFramesForCapture(): List<BufferedHevcFrame> {
+    val frames = frameBuffer.snapshot()
+    if (frames.any { it.isConfig }) return frames
+    val csd = csdCollector.complete() ?: return frames
+    return listOf(BufferedHevcFrame(csd, 0L, isConfig = true, isKeyFrame = false)) + frames
   }
 
   // MARK: - Surface
@@ -466,11 +517,23 @@ class CameraViewModel(
   // Every frame comes from the live preview (PixelCopy), never from capturePhoto, so the glasses
   // shutter never sounds.
   private suspend fun previewFaceCrop(): ByteArray? {
-    val bitmap = capturePreviewBitmap() ?: return null
+    val bitmap = capturePreviewBitmap() ?: captureOffscreenBitmap() ?: return null
     val crop = withContext(Dispatchers.Default) { faceDetector.cropLargestFace(bitmap) }
     Log.d(TAG, "Recognition crop: preview=${bitmap.width}x${bitmap.height} crop=${crop?.size ?: 0}B")
     bitmap.recycle()
     return crop
+  }
+
+  /** Fallback for the live preview: decode the newest buffered GOP offscreen. */
+  private suspend fun captureOffscreenBitmap(): Bitmap? {
+    if (!frameBuffer.hasCapturableFrame()) return null
+    val jpeg =
+        offscreenCapturer.capture(
+            latestFrameWidth, latestFrameHeight, bufferedFramesForCapture())
+            ?: return null
+    return withContext(Dispatchers.Default) {
+      BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+    }
   }
 
   private suspend fun capturePreviewBitmap(): Bitmap? {
@@ -689,6 +752,9 @@ class CameraViewModel(
     // primed with a complete VPS+SPS+PPS set.
     csdCollector.offer(byteArray)
 
+    // KAN-202: keep the newest GOP so an alert photo can be decoded without the UI preview Surface.
+    frameBuffer.add(byteArray, presentationTimeUs, videoFrame.isCodecConfig)
+
     // Append to the recorder (no-op unless recording); keeps writing while backgrounded.
     videoRecorder.writeCompressedFrame(
         byteArray,
@@ -742,6 +808,7 @@ class CameraViewModel(
       hevcDecoder = null
     }
     csdCollector.reset()
+    frameBuffer.clear()
     StreamingService.stop(getApplication())
     // STOPPED is restartable, so only stop() detaches the capability; without it the next
     // addCamera() fails with "a capability of this type is already active". Stopping the camera
