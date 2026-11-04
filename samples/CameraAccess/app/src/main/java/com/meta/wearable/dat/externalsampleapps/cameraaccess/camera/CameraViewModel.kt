@@ -174,6 +174,11 @@ class CameraViewModel(
         }
       }
     }
+    viewModelScope.launch {
+      voiceController.subtitle.collect { subtitle ->
+        _uiState.update { it.copy(subtitle = subtitle) }
+      }
+    }
     setupVoiceRequestHandlers()
   }
 

@@ -89,6 +89,10 @@ class OpenAiVoiceController(
   val faceRecognitionRequests: SharedFlow<FaceRecognitionRequest> =
       _faceRecognitionRequests.asSharedFlow()
 
+  /** KAN-199: ultimo subtitulo de la conversacion (Faro o paciente). */
+  private val _subtitle = MutableStateFlow<VoiceSubtitle?>(null)
+  val subtitle: StateFlow<VoiceSubtitle?> = _subtitle.asStateFlow()
+
   @Volatile private var socket: WebSocket? = null
   @Volatile private var audioRecord: AudioRecord? = null
   @Volatile private var playback: InterruptiblePlayback? = null
@@ -135,6 +139,9 @@ class OpenAiVoiceController(
               text.startsWith(FAMILY_HELP_REQUEST_PREFIX) -> handleFamilyHelpRequest(text)
               text.startsWith(LOCATION_ANSWER_REQUEST_PREFIX) -> handleLocationRequest(text)
               text.startsWith(FACE_RECOGNITION_REQUEST_PREFIX) -> handleFaceRecognitionRequest(text)
+              // KAN-199: subtitulos de lo que dice Faro y de lo que escucha del paciente.
+              text.startsWith(FARO_TEXT_PREFIX) || text.startsWith(FARO_USER_TEXT_PREFIX) ->
+                  FaroSubtitleProtocol.parse(text)?.let { _subtitle.value = it }
             }
           }
         }
@@ -287,6 +294,7 @@ class OpenAiVoiceController(
       releaseAudio()
       audioManager?.clearCommunicationDevice()
       audioManager?.mode = AudioManager.MODE_NORMAL
+      _subtitle.value = null
       _state.value = VoiceConnectionState.STOPPED
     }
   }
@@ -300,6 +308,7 @@ class OpenAiVoiceController(
   @Synchronized
   private fun scheduleReconnect(reason: String) {
     releaseAudio()
+    _subtitle.value = null
     socket = null
     if (!running.get()) return
     val delayMillis = min(1000L shl min(reconnectAttempt, 4), 15000L)
@@ -572,5 +581,7 @@ class OpenAiVoiceController(
     private const val FAMILY_HELP_REQUEST_PREFIX = "FAMILY_HELP_REQUEST:"
     private const val LOCATION_ANSWER_REQUEST_PREFIX = "LOCATION_ANSWER_REQUEST:"
     private const val FACE_RECOGNITION_REQUEST_PREFIX = "FACE_RECOGNITION_REQUEST:"
+    private const val FARO_TEXT_PREFIX = "FARO_TEXT:"
+    private const val FARO_USER_TEXT_PREFIX = "FARO_USER_TEXT:"
   }
 }

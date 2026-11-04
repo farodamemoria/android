@@ -84,6 +84,7 @@ dependencies {
   implementation("com.google.mlkit:face-detection:16.1.7")
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   testImplementation("junit:junit:4.13.2")
+  testImplementation("org.json:json:20250517")
   androidTestImplementation(libs.androidx.ui.test.junit4)
   androidTestImplementation(libs.androidx.test.uiautomator)
   androidTestImplementation(libs.androidx.test.rules)

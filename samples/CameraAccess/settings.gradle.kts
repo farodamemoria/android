@@ -53,3 +53,5 @@ dependencyResolutionManagement {
 rootProject.name = "CameraAccess"
 
 include(":app")
+include(":mobile-app")
+
