@@ -34,6 +34,8 @@ val localProperties =
     }
 
 dependencyResolutionManagement {
+    repositories { mavenLocal() }
+
   repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
   repositories {
     google()
