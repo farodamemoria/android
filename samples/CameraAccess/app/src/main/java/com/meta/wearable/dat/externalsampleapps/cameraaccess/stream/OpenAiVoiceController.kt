@@ -560,7 +560,7 @@ class OpenAiVoiceController(
     const val SAMPLE_RATE = 24000
 
     private const val CAPTURE_CHUNK_BYTES = 2400
-    private const val REALTIME_URL = "wss://d2n7ih9kfxbzvd.cloudfront.net/realtime"
+    private const val REALTIME_URL = "wss://api.loginea.com/realtime"
 
     private const val PERMISSION_RECORD_AUDIO = "android.permission.RECORD_AUDIO"
     private const val PERMISSION_BLUETOOTH_CONNECT = "android.permission.BLUETOOTH_CONNECT"

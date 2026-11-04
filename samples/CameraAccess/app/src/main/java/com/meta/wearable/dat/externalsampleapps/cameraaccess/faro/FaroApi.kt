@@ -9,7 +9,7 @@ import java.util.Locale
 import org.json.JSONObject
 
 object FaroApi {
-  const val BASE = "https://d2n7ih9kfxbzvd.cloudfront.net"
+  const val BASE = "https://api.loginea.com"
 
   /** Device credential obtained at pairing; never a hardcoded fallback. */
   fun token(context: Context): String = FaroPairing.credential(context)
