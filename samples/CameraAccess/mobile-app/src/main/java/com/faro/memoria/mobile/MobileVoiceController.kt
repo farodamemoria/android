@@ -26,7 +26,7 @@ class MobileVoiceController(
     private val credentialProvider: () -> String,
     private val onStatus: (String) -> Unit,
     private val onCameraRequest: (String) -> Unit,
-    private val onLocationAnswerRequest: (String) -> Unit,
+    private val onLocationAnswerRequest: (LocationRequest) -> Unit,
     private val onFaroText: (String) -> Unit,
     private val onUserText: (String) -> Unit = {},
 ) {
@@ -152,7 +152,7 @@ class MobileVoiceController(
         val callId = runCatching { JSONObject(raw).optString("call_id") }.getOrDefault(raw)
         if (callId.isNotBlank()) onCameraRequest(callId)
       } else {
-        LocationAnswerProtocol.requestCallId(text)?.let(onLocationAnswerRequest)
+        LocationAnswerProtocol.request(text)?.let(onLocationAnswerRequest)
         if (text.startsWith("ERROR:")) onStatus("Faro no está disponible ahora")
       }
     }
