@@ -49,6 +49,11 @@ class MainActivity : ComponentActivity() {
   private var listening = false
   private val cameraGate = CameraCaptureGate()
   private var autoCapturePending = false
+  private lateinit var liveViews: LiveViewSession
+  private val liveViewHandler = android.os.Handler(android.os.Looper.getMainLooper())
+  private var liveViewActive = false
+  private var liveViewFrameInFlight = false
+  private var liveViewFrames = 0
 
   private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
     if (granted[Manifest.permission.RECORD_AUDIO] == true) startFaro() else status.text = "El micrófono es necesario"
@@ -115,8 +120,21 @@ class MainActivity : ComponentActivity() {
         autoCapturePending = false
         cameraPreviewView.postDelayed({ takePhoto() }, 400)
       }
+      if (streaming && liveViewActive) {
+        cameraPreviewView.postDelayed({ takeLiveFrame() }, 400)
+      }
     }
-    val cancelCamera = Button(this).apply { text = "Cancelar"; setOnClickListener { closeCamera(cancelled = true) } }
+    val cancelCamera = Button(this).apply {
+      text = "Cancelar"
+      setOnClickListener {
+        if (liveViewActive) {
+          Thread { liveViews.close("cancelled") }.start()
+          endLiveView()
+        } else {
+          closeCamera(cancelled = true)
+        }
+      }
+    }
     cameraOverlay = FrameLayout(this).apply {
       visibility = android.view.View.GONE
       setBackgroundColor(Color.rgb(10, 20, 22))
@@ -150,7 +168,14 @@ class MainActivity : ComponentActivity() {
       { preferences.getString("device_credential", "").orEmpty() },
       { result -> controller.submitLocationAnswer(result) },
     )
+    liveViews = LiveViewSession(
+      LiveViewClient(BuildConfig.API_URL) {
+        preferences.getString("device_credential", "").orEmpty()
+      },
+      "phone",
+    )
     updatePairingState()
+    startLiveViewPolling()
   }
 
   private fun initCamera() {
@@ -291,5 +316,90 @@ class MainActivity : ComponentActivity() {
     userSubtitle.text = ""; userSubtitle.visibility = android.view.View.GONE
     faroSubtitle.text = ""; faroSubtitle.visibility = android.view.View.GONE
   }
-  override fun onDestroy() { controller.stop(); locationAnswers.close(); cameraProvider?.unbindAll(); super.onDestroy() }
+
+  /** KAN-209: cada 3 s pregunta al backend si el portal quiere ver el movil en directo. */
+  private val liveViewPoll = object : Runnable {
+    override fun run() {
+      Thread {
+        val request = liveViews.poll(System.currentTimeMillis())
+        runOnUiThread {
+          if (request != null && !liveViewActive && !cameraGate.isInFlight) {
+            beginLiveView()
+          } else if (request == null && liveViewActive) {
+            endLiveView()
+          }
+        }
+      }.start()
+      liveViewHandler.postDelayed(this, 3000)
+    }
+  }
+
+  private fun startLiveViewPolling() {
+    liveViewHandler.postDelayed(liveViewPoll, 2000)
+  }
+
+  private fun beginLiveView() {
+    if (liveViewActive || cameraGate.isInFlight) return
+    if (preferences.getString("device_credential", "").orEmpty().isBlank()) return
+    liveViewActive = true
+    liveViewFrames = 0
+    status.text = "El portal esta viendo la camara en directo"
+    showCameraOverlay()
+    liveViewHandler.postDelayed({ takeLiveFrame() }, 1500)
+  }
+
+  private fun takeLiveFrame() {
+    if (!liveViewActive) return
+    if (!shutterButton.isEnabled || liveViewFrameInFlight) {
+      liveViewHandler.postDelayed({ takeLiveFrame() }, 800)
+      return
+    }
+    val capture = imageCapture ?: run {
+      liveViewHandler.postDelayed({ takeLiveFrame() }, 800)
+      return
+    }
+    liveViewFrameInFlight = true
+    val file = File(cacheDir, "faro-live-${System.currentTimeMillis()}.jpg")
+    val output = ImageCapture.OutputFileOptions.Builder(file).build()
+    capture.takePicture(output, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
+      override fun onImageSaved(results: ImageCapture.OutputFileResults) {
+        Thread {
+          val jpeg = compressJpegForSend(file, maxDimension = 960, quality = 60)
+          val uploaded = liveViews.frame(jpeg, System.currentTimeMillis())
+          file.delete()
+          runOnUiThread {
+            liveViewFrameInFlight = false
+            if (uploaded) {
+              liveViewFrames += 1
+              status.text = "Directo enviado ($liveViewFrames fotogramas)"
+            }
+            if (liveViewActive) liveViewHandler.postDelayed({ takeLiveFrame() }, 900)
+          }
+        }.start()
+      }
+
+      override fun onError(exception: ImageCaptureException) {
+        file.delete()
+        runOnUiThread {
+          liveViewFrameInFlight = false
+          if (liveViewActive) liveViewHandler.postDelayed({ takeLiveFrame() }, 1200)
+        }
+      }
+    })
+  }
+
+  private fun endLiveView() {
+    if (!liveViewActive) return
+    liveViewActive = false
+    liveViewFrameInFlight = false
+    cameraOverlay.visibility = android.view.View.GONE
+    if (!cameraGate.isInFlight) cameraProvider?.unbindAll()
+    status.text = "Directo finalizado"
+  }
+
+  override fun onDestroy() {
+    if (liveViewActive) Thread { liveViews.close("completed") }.start()
+    liveViewHandler.removeCallbacks(liveViewPoll)
+    controller.stop(); locationAnswers.close(); cameraProvider?.unbindAll(); super.onDestroy()
+  }
 }
