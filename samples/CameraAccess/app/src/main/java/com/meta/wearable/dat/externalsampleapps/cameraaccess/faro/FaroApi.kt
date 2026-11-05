@@ -6,6 +6,7 @@ import android.util.Log
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
+import org.json.JSONArray
 import org.json.JSONObject
 
 object FaroApi {
@@ -64,6 +65,84 @@ object FaroApi {
     } catch (error: Exception) {
       Log.w("FaroApi", "claim failed: ${error.message}")
       null
+    }
+  }
+
+  /** KAN-209: solicitudes de directo que el portal ha pedido a estas gafas. */
+  fun listLiveViews(context: Context, source: String = "glasses"): List<LiveViewRequest> {
+    val token = token(context)
+    if (token.isBlank()) return emptyList()
+    return try {
+      val connection =
+          URL("$BASE/v1/live-views?source=$source").openConnection() as HttpURLConnection
+      connection.requestMethod = "GET"
+      connection.connectTimeout = 8000
+      connection.readTimeout = 8000
+      connection.setRequestProperty("Authorization", "Bearer $token")
+      connection.setRequestProperty("X-Faro-Device-Source", source)
+      if (connection.responseCode != 200) return emptyList()
+      val body = connection.inputStream.bufferedReader().use { it.readText() }
+      val array = JSONArray(body)
+      (0 until array.length()).mapNotNull { index ->
+        val item = array.optJSONObject(index) ?: return@mapNotNull null
+        LiveViewRequest(
+            id = item.optString("id"),
+            source = item.optString("source"),
+            status = item.optString("status"),
+        )
+      }
+    } catch (error: Exception) {
+      Log.w("FaroApi", "listLiveViews failed: ${error.message}")
+      emptyList()
+    }
+  }
+
+  /** KAN-209: sube un fotograma JPEG al directo pedido por el portal. */
+  fun sendLiveViewFrame(context: Context, viewId: String, jpeg: ByteArray): Boolean {
+    val token = token(context)
+    if (token.isBlank() || jpeg.isEmpty()) return false
+    return try {
+      val connection =
+          URL("$BASE/v1/live-views/$viewId/frame").openConnection() as HttpURLConnection
+      connection.requestMethod = "POST"
+      connection.doOutput = true
+      connection.connectTimeout = 8000
+      connection.readTimeout = 12000
+      connection.setRequestProperty("Authorization", "Bearer $token")
+      connection.setRequestProperty("X-Faro-Device-Source", "glasses")
+      connection.setRequestProperty("Content-Type", "image/jpeg")
+      connection.outputStream.use { it.write(jpeg) }
+      val accepted = connection.responseCode in 200..299
+      Log.i("FaroApi", "live frame -> HTTP ${connection.responseCode}")
+      connection.disconnect()
+      accepted
+    } catch (error: Exception) {
+      Log.w("FaroApi", "sendLiveViewFrame failed: ${error.message}")
+      false
+    }
+  }
+
+  /** KAN-209: cierra la solicitud desde las gafas (al terminar o al cancelar el usuario). */
+  fun finishLiveView(context: Context, viewId: String, status: String = "completed"): Boolean {
+    val token = token(context)
+    if (token.isBlank()) return false
+    return try {
+      val connection =
+          URL("$BASE/v1/live-views/$viewId/status").openConnection() as HttpURLConnection
+      connection.requestMethod = "POST"
+      connection.doOutput = true
+      connection.connectTimeout = 8000
+      connection.readTimeout = 8000
+      connection.setRequestProperty("Authorization", "Bearer $token")
+      connection.setRequestProperty("X-Faro-Device-Source", "glasses")
+      connection.setRequestProperty("Content-Type", "application/json")
+      connection.outputStream.use {
+        it.write(JSONObject().put("status", status).toString().toByteArray())
+      }
+      connection.responseCode in 200..299
+    } catch (error: Exception) {
+      Log.w("FaroApi", "finishLiveView failed: ${error.message}")
+      false
     }
   }
 

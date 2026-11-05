@@ -48,6 +48,9 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroAudioMonit
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroNotify
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroPairing
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroSpeaker
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.LiveViewRequest
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.LiveViewController
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.LiveViewTransport
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.LocalFaceDetector
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
@@ -76,6 +79,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -100,6 +104,11 @@ class CameraViewModel(
     // KAN-202: how long to wait for the DAT stream / a buffered keyframe when Faro asks for a photo.
     private const val CAPTURE_STREAM_WAIT_MS = 8000L
     private const val CAPTURE_BUFFER_WAIT_MS = 3000L
+    // KAN-209: ritmo del directo de las gafas hacia el portal.
+    private const val LIVE_VIEW_POLL_MS = 3000L
+    private const val LIVE_VIEW_FRAME_MS = 1500L
+    private const val LIVE_VIEW_RETRY_MS = 2000L
+    private const val LIVE_VIEW_MAX_IDLE_FRAMES = 20
   }
 
   private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
@@ -150,6 +159,21 @@ class CameraViewModel(
   private var streamStateJob: Job? = null
   private var streamErrorJob: Job? = null
 
+  // KAN-209: solicitudes de directo del portal atendidas con fotogramas JPEG de las gafas.
+  private val liveViews =
+      LiveViewController(
+          object : LiveViewTransport {
+            override fun pending(source: String): List<LiveViewRequest> =
+                FaroApi.listLiveViews(getApplication(), source)
+
+            override fun uploadFrame(viewId: String, jpeg: ByteArray): Boolean =
+                FaroApi.sendLiveViewFrame(getApplication(), viewId, jpeg)
+
+            override fun finish(viewId: String, status: String): Boolean =
+                FaroApi.finishLiveView(getApplication(), viewId, status)
+          }
+      )
+
   init {
     videoRecorder.setAudioInputHandler(audioInputHandler)
 
@@ -193,6 +217,51 @@ class CameraViewModel(
       }
     }
     setupVoiceRequestHandlers()
+    setupLiveViewLoop()
+  }
+
+  // MARK: - Live view (KAN-209)
+
+  /**
+   * KAN-209: sondea las solicitudes del portal y, mientras siga activa, captura y envia un
+   * fotograma JPEG cada 1,5 s. Se detiene al cerrar el portal o tras 20 fallos seguidos.
+   */
+  private fun setupLiveViewLoop() {
+    viewModelScope.launch {
+      while (isActive) {
+        delay(LIVE_VIEW_POLL_MS)
+        if (!FaroPairing.isPaired(getApplication())) continue
+        val request =
+            withContext(Dispatchers.IO) { liveViews.poll(System.currentTimeMillis()) }
+                ?: continue
+        Log.i(TAG, "Directo solicitado para ${request.id}")
+        var idle = 0
+        var frames = 0
+        while (isActive && idle < LIVE_VIEW_MAX_IDLE_FRAMES) {
+          val jpeg = captureJpegForVoice()
+          val uploaded =
+              jpeg != null &&
+                  withContext(Dispatchers.IO) {
+                    liveViews.frame(jpeg, System.currentTimeMillis())
+                  }
+          if (uploaded) {
+            idle = 0
+            frames += 1
+            if (frames % 4 == 0) {
+              val stillThere =
+                  withContext(Dispatchers.IO) { liveViews.poll(System.currentTimeMillis()) }
+              if (stillThere == null) break
+            }
+            delay(LIVE_VIEW_FRAME_MS)
+          } else {
+            idle += 1
+            delay(LIVE_VIEW_RETRY_MS)
+          }
+        }
+        withContext(Dispatchers.IO) { liveViews.close("completed") }
+        Log.i(TAG, "Directo terminado tras $frames fotograma(s)")
+      }
+    }
   }
 
   // MARK: - Realtime voice (KAN-112)
