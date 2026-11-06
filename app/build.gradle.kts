@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  * All rights reserved.
  *
@@ -59,7 +59,7 @@ android {
 
   buildTypes {
     debug {
-      versionNameSuffix = "-faro-validated"
+      versionNameSuffix = "-faro-validated+kan191"
     }
     release {
       isMinifyEnabled = true
@@ -103,3 +103,4 @@ dependencies {
   androidTestImplementation(libs.androidx.test.uiautomator)
   androidTestImplementation(libs.androidx.test.rules)
 }
+

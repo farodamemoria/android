@@ -11,10 +11,12 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess
 import android.app.Application
 import android.util.Log
 import com.meta.wearable.dat.core.Wearables
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.faro.FaroErrorReporter
 
 class CameraAccessApplication : Application() {
   override fun onCreate() {
     super.onCreate()
+    FaroErrorReporter.install(this)
     Wearables.initialize(this)
         .onFailure { error, _ -> Log.e(TAG, "Failed to initialize DAT: ${error.description}") }
   }

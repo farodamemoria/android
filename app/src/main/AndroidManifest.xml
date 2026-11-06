@@ -96,6 +96,15 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- KAN-191: disparador de crash controlado (solo debug) -->
+        <receiver
+            android:name=".faro.CrashTestReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.faro.memoria.CRASH_TEST" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
 

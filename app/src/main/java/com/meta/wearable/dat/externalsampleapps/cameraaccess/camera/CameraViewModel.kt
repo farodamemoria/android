@@ -164,6 +164,9 @@ class CameraViewModel(
   private var videoJob: Job? = null
   private var streamStateJob: Job? = null
   private var streamErrorJob: Job? = null
+  // KAN-202: si el canal DAT se cae (gafas dormidas, BT, error del runtime) reabrimos solos.
+  @Volatile private var userStopRequested = false
+  private var reconnectAttempts = 0
   private var visionAuditSent = false
   private var liveVisionJob: Job? = null
   private var automaticFaceJob: Job? = null
@@ -411,6 +414,7 @@ class CameraViewModel(
    */
   fun startStreaming() {
     Log.i(TAG, "startStreaming requested; session=${_uiState.value.sessionState}, stream=${_uiState.value.streamState}")
+    userStopRequested = false
     if (!_uiState.value.isSessionActive) {
       wearablesViewModel.setRecentError(
           getApplication<Application>().getString(R.string.error_start_session_first)
@@ -507,6 +511,7 @@ class CameraViewModel(
   /** Stops the camera stream but keeps the [DeviceSession] connected. */
   fun stopStreaming() {
     val current = camera ?: return
+    userStopRequested = true
     _uiState.update { it.copy(streamState = StreamState.STOPPING) }
     current.stop()
     // The stream-state collector converges teardown when STOPPED/CLOSED arrives.
@@ -529,9 +534,13 @@ class CameraViewModel(
         val isTerminal = state == StreamState.STOPPED || state == StreamState.CLOSED
         if (!isTerminal) {
           hasBeenActive = true
+          if (state == StreamState.STREAMING) {
+            reconnectAttempts = 0
+          }
         } else if (hasBeenActive) {
           hasBeenActive = false
           onStreamTerminated()
+          scheduleReconnect()
         }
       }
     }
@@ -540,6 +549,25 @@ class CameraViewModel(
         Log.e(TAG, "Stream error: ${error.description}")
         wearablesViewModel.setRecentError(error.getLocalizedDescription(getApplication()))
       }
+    }
+  }
+
+  private fun scheduleReconnect() {
+    // KAN-202: reabrir el stream solo si el usuario no lo paro y la sesion sigue viva.
+    if (userStopRequested) return
+    if (!_uiState.value.isSessionActive || _uiState.value.isPaused) return
+    if (reconnectAttempts >= 6) {
+      Log.w(TAG, "Auto-reconexion agotada tras ${reconnectAttempts} intentos")
+      return
+    }
+    val attempt = reconnectAttempts
+    reconnectAttempts += 1
+    viewModelScope.launch {
+      delay(2_500L * (attempt + 1))
+      if (userStopRequested || !_uiState.value.isSessionActive || _uiState.value.isPaused) return@launch
+      if (_uiState.value.streamState != StreamState.STOPPED) return@launch
+      Log.i(TAG, "Auto-reconexion del stream DAT (intento ${attempt + 1})")
+      startStreaming()
     }
   }
 
