@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  * All rights reserved.
  *
@@ -51,6 +51,6 @@ dependencyResolutionManagement {
 rootProject.name = "CameraAccess"
 
 include(":app")
-include(":realtime-backend")
 include(":family-app")
 include(":mobile-app")
+
