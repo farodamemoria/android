@@ -177,6 +177,27 @@ fun CameraScreen(
       )
     }
 
+    // KAN-201: banda de subtitulos con lo que dice Faro y lo que escucha del paciente.
+    ui.subtitle?.let { subtitle ->
+      Box(
+          modifier =
+              Modifier.align(Alignment.BottomCenter)
+                  .navigationBarsPadding()
+                  .padding(start = 16.dp, end = 16.dp, bottom = 180.dp)
+                  .background(Color(0xE6123F47), RoundedCornerShape(12.dp))
+                  .padding(horizontal = 16.dp, vertical = 10.dp)
+                  .testTag("voice_subtitle"),
+          contentAlignment = Alignment.Center,
+      ) {
+        Text(
+            text = (if (subtitle.fromPatient) "Tú: " else "Faro: ") + subtitle.text,
+            color = Color(0xFFF6F0E4),
+            fontSize = 16.sp,
+            textAlign = TextAlign.Center,
+        )
+      }
+    }
+
     ui.activePreview?.let { preview ->
       CapturePreviewScreen(
           preview = preview,

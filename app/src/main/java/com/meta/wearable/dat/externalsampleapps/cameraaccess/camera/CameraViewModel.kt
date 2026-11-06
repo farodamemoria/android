@@ -212,6 +212,12 @@ class CameraViewModel(
       }
     }
     viewModelScope.launch {
+      // KAN-201: banda de subtitulos con lo que dice Faro y lo que escucha del paciente.
+      openAiVoiceController.subtitle.collect { subtitle ->
+        _uiState.update { it.copy(subtitle = subtitle) }
+      }
+    }
+    viewModelScope.launch {
       openAiVoiceController.cameraRequests.collect { request ->
         if (request.safetyInvestigation) {
           familyHelpCoordinator.ensureSafetyTracking()

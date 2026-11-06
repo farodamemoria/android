@@ -18,6 +18,7 @@ import android.net.Uri
 import com.meta.wearable.dat.camera.types.StreamState
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.VoiceConnectionState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.VoiceSubtitle
 
 /** A capture awaiting preview/share — a still photo or a recorded video file. */
 sealed interface CapturePreview {
@@ -58,6 +59,8 @@ data class CameraUiState(
     val automaticFaceRecognition: Boolean = true,
     val isRecognizingFace: Boolean = false,
     val faceRecognitionMessage: String = "Identificación automática activa",
+    // KAN-201: subtitulo de la conversacion (lo que dice Faro o lo que escucha del paciente).
+    val subtitle: VoiceSubtitle? = null,
 ) {
   /** A session exists and is connected (or connecting); a stream can be started. */
   val hasSession: Boolean

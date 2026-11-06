@@ -77,6 +77,16 @@ class OpenAiVoiceController(
   private val _faceRecognitionRequests = MutableSharedFlow<FaceRecognitionRequest>(extraBufferCapacity = 1)
   val faceRecognitionRequests: SharedFlow<FaceRecognitionRequest> = _faceRecognitionRequests
 
+  /** KAN-201: ultimo subtitulo de la conversacion (lo que dice Faro o lo que escucha del paciente). */
+  private val _subtitle = MutableStateFlow<VoiceSubtitle?>(null)
+  val subtitle: StateFlow<VoiceSubtitle?> = _subtitle.asStateFlow()
+  private val subtitleLifetime = FaroSubtitleLifetime()
+  private val subtitleExpiry =
+      Runnable {
+        subtitleLifetime.clear()
+        _subtitle.value = null
+      }
+
   @Volatile private var socket: WebSocket? = null
   @Volatile private var audioRecord: AudioRecord? = null
   @Volatile private var playback: InterruptiblePlayback? = null
@@ -145,6 +155,8 @@ class OpenAiVoiceController(
     releaseAudio()
     audioManager.clearCommunicationDevice()
     audioManager.mode = AudioManager.MODE_NORMAL
+    subtitleLifetime.clear()
+    _subtitle.value = null
     _state.value = VoiceConnectionState.STOPPED
   }
 
@@ -237,6 +249,15 @@ class OpenAiVoiceController(
                   }
                   .onFailure { Log.e(TAG, "Invalid face recognition request", it) }
             }
+            // KAN-201: subtitulos de lo que dice Faro y de lo que escucha del paciente.
+            text.startsWith("FARO_TEXT:") || text.startsWith("FARO_USER_TEXT:") ->
+                FaroSubtitleProtocol.parse(text)?.let { subtitle ->
+                  _subtitle.value =
+                      subtitleLifetime.show(subtitle, android.os.SystemClock.elapsedRealtime())
+                  reconnectHandler.removeCallbacks(subtitleExpiry)
+                  reconnectHandler.postDelayed(
+                      subtitleExpiry, FaroSubtitleLifetime.DEFAULT_TTL_MILLIS)
+                }
           }
         }
 
@@ -252,6 +273,8 @@ class OpenAiVoiceController(
 
   private fun scheduleReconnect(reason: String) {
     releaseAudio()
+    // KAN-201: la banda no se borra al reconectar; se conserva hasta caducar o cambiar de texto.
+    _subtitle.value = subtitleLifetime.onReconnect(android.os.SystemClock.elapsedRealtime())
     socket = null
     if (!running.get()) return
     val delayMillis = (1_000L shl reconnectAttempt.coerceAtMost(4)).coerceAtMost(15_000L)

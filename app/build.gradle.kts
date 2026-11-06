@@ -59,7 +59,7 @@ android {
 
   buildTypes {
     debug {
-      versionNameSuffix = "-faro-validated+kan191"
+      versionNameSuffix = "-faro-validated+kan201"
     }
     release {
       isMinifyEnabled = true
@@ -86,6 +86,7 @@ kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
 dependencies {
   testImplementation("junit:junit:4.13.2")
+  testImplementation("org.json:json:20250517")
   implementation(libs.androidx.activity.compose)
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.exifinterface)
@@ -103,4 +104,6 @@ dependencies {
   androidTestImplementation(libs.androidx.test.uiautomator)
   androidTestImplementation(libs.androidx.test.rules)
 }
+
+
 
