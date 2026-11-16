@@ -32,8 +32,8 @@ android {
     // Meta Wearables Device Access Toolkit Setup
     // Without Developer Mode, these values need to be set with credentials from the app registered
     // in Wearables Developer Center
-    manifestPlaceholders["mwdat_application_id"] = ""
-    manifestPlaceholders["mwdat_client_token"] = ""
+    manifestPlaceholders["mwdat_application_id"] = "0"
+    manifestPlaceholders["mwdat_client_token"] = "0"
   }
 
   buildTypes {
